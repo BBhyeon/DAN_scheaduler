@@ -1,0 +1,6 @@
+batch_id,cell,start_date,note,initial_plate_count,replaced_plate_count,end_date
+2,C4_P36_A,2025.5.13,"*spotting: 1 day after the passage of iPSC maintenance, 1E+4 cells in 10 uL per spot.
+
+* Day10: Day9 media was not applied so that the starting date was adjusted +1 to make Day 10 is shown as Day 10. 
+
+- Replacting: 6 plates (DMEM/F12 + Laminin), 4 plates (DPBS + Laminin) coating. Cell density test, ",3,7,
