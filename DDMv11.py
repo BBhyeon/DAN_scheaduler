@@ -4,6 +4,9 @@ from pandas import ExcelWriter
 from datetime import datetime, timedelta
 import os
 import json
+import re
+from PIL import Image
+from streamlit_sortables import sort_items
 
 st.set_page_config(page_title="DAC_manager_v11", layout="wide")
 
@@ -132,12 +135,11 @@ USER_BATCH_DIR = os.path.join("batches", username)
 BATCH_DIR = USER_BATCH_DIR
 os.makedirs(BATCH_DIR, exist_ok=True)
 PROTOCOL_FILE = "DAP_protocol_extended.xlsx"
-BATCHES_CSV = os.path.join(BATCH_DIR, "batches.csv")
 
 # ---------------------- TOP-BAR NAVIGATION ----------------------
 nav_bar = st.container()
 with nav_bar:
-    tab1, tab2, tab3 = st.columns([1, 1, 1])
+    tab1, tab2, tab3, tab4 = st.columns([1, 1, 1, 1])
     with tab1:
         if st.button("Calendar"):
             st.session_state["view"] = "Calendar"
@@ -147,6 +149,9 @@ with nav_bar:
     with tab3:
         if st.button("Batch Manager"):
             st.session_state["view"] = "Batch Manager"
+    with tab4:
+        if st.button("Image Viewer"):
+            st.session_state["view"] = "Image Viewer"
 
 # ---------------------- CONFIG ----------------------
 
@@ -516,12 +521,6 @@ if st.session_state['view'] == 'Batch Manager':
         edited_cell_df = st.data_editor(cell_df, use_container_width=True)
 
         if st.button("Save New Batch"):
-            if os.path.exists(BATCHES_CSV):
-                df = pd.read_csv(BATCHES_CSV, dtype=str)
-            else:
-                df = pd.DataFrame(columns=[
-                    "batch_id","cell","start_date","end_date","note","day15","day21","banking"
-                ])
             row = {
                 "batch_id": str(new_bid),
                 "cell": new_cell,
@@ -532,10 +531,7 @@ if st.session_state['view'] == 'Batch Manager':
                 "day21": new_day21,
                 "banking": new_banking
             }
-            df = df[df['batch_id'] != str(new_bid)]
-            df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
-            df.to_csv(BATCHES_CSV, index=False)
-            # Save both summary and cell counts into one Excel file
+            # Save summary and cell counts into Excel
             with ExcelWriter(counts_file) as writer:
                 pd.DataFrame([row]).to_excel(writer, sheet_name="info", index=False)
                 edited_cell_df.to_excel(writer, sheet_name="cell_counts")
@@ -544,76 +540,161 @@ if st.session_state['view'] == 'Batch Manager':
     elif st.session_state['mode'] == 'edit':
         bid = st.session_state['edit_id']
         st.subheader(f"Batch Information #{bid}")
-        # Use global BATCHES_CSV
-        if os.path.exists(BATCHES_CSV):
-            df_all = pd.read_csv(BATCHES_CSV, dtype=str)
-            rec = df_all[df_all['batch_id'] == str(bid)]
-            if not rec.empty:
-                rec = rec.iloc[0]
-                edit_cell = st.text_input("Cell Type", value=rec.get('cell',''), key='edit_cell')
-                sdt = pd.to_datetime(rec.get('start_date'), format="%Y.%m.%d", errors='coerce')
-                # Parse end_date if present; otherwise treat as NaT
-                if rec.get('end_date', ""):
-                    edt_parsed = pd.to_datetime(rec.get('end_date'), format="%Y.%m.%d", errors='coerce')
-                else:
-                    edt_parsed = pd.NaT
-                # Default to start_date + 21 days if parsed end is NaT
-                if pd.isna(edt_parsed) and not pd.isna(sdt):
-                    default_edate = (sdt + timedelta(days=21)).date()
-                elif pd.isna(edt_parsed):
-                    default_edate = today + timedelta(days=21)
-                else:
-                    default_edate = edt_parsed.date()
-
-                edit_sdate = st.date_input(
-                    "Start Date",
-                    value=sdt.date() if not pd.isna(sdt) else today,
-                    key='edit_sdate'
-                )
-                edit_edate = st.date_input(
-                    "End Date",
-                    value=default_edate,
-                    key='edit_edate'
-                )
-                edit_note   = st.text_area("Note", value=rec.get('note',''), key='edit_note')
-                edit_day15  = st.text_input("Day 15 Info", value=rec.get('day15',''), key='edit_day15')
-                edit_day21  = st.text_input("Day 21 Info", value=rec.get('day21',''), key='edit_day21')
-                edit_banking= st.text_input("Banking Info", value=rec.get('banking',''), key='edit_banking')
-
-                # --- Cell Count Table Editor ---
-                st.subheader("Cell count information")
-                cols = ["A", "B", "C"] + [str(i) for i in range(1, 16)]
-                cell_index = ["Day 15", "Day 21", "Banking"]
-                counts_file = os.path.join(BATCH_DIR, f"batch_{bid}.xlsx")
-                if os.path.exists(counts_file):
-                    try:
-                        cell_df = pd.read_excel(counts_file, sheet_name="cell_counts", index_col=0)
-                    except:
-                        cell_df = pd.DataFrame(index=cell_index, columns=cols)
-                else:
-                    cell_df = pd.DataFrame(index=cell_index, columns=cols)
-                edited_cell_df = st.data_editor(cell_df, use_container_width=True)
-
-                if st.button("Update Batch Information"):
-                    new_row = {
-                        "batch_id": str(bid),
-                        "cell": edit_cell,
-                        "start_date": edit_sdate.strftime("%Y.%m.%d"),
-                        "end_date": edit_edate.strftime("%Y.%m.%d") if edit_edate else "",
-                        "note": edit_note,
-                        "day15": edit_day15,
-                        "day21": edit_day21,
-                        "banking": edit_banking
-                    }
-                    df_all = df_all[df_all['batch_id'] != str(bid)]
-                    df_all = pd.concat([df_all, pd.DataFrame([new_row])], ignore_index=True)
-                    df_all.to_csv(BATCHES_CSV, index=False)
-                    # Save updated summary and cell counts into the same Excel file
-                    with ExcelWriter(counts_file) as writer:
-                        pd.DataFrame([new_row]).to_excel(writer, sheet_name="info", index=False)
-                        edited_cell_df.to_excel(writer, sheet_name="cell_counts")
-                    st.success(f"Batch {bid} updated.")
-            else:
-                st.error(f"Batch {bid} not found in batches.csv.")
+        # Load batch info directly from the batch_<id>.xlsx 'info' sheet
+        counts_file = os.path.join(BATCH_DIR, f"batch_{bid}.xlsx")
+        if os.path.exists(counts_file):
+            df_info = pd.read_excel(counts_file, sheet_name="info", dtype=str)
+            rec = df_info.iloc[0:1]
         else:
-            st.error("batches.csv not found. Cannot load batch.")
+            rec = pd.DataFrame()
+        if not rec.empty:
+            rec = rec.iloc[0]
+            edit_cell = st.text_input("Cell Type", value=rec.get('cell',''), key='edit_cell')
+            sdt = pd.to_datetime(rec.get('start_date'), format="%Y.%m.%d", errors='coerce')
+            # Parse end_date if present; otherwise treat as NaT
+            if rec.get('end_date', ""):
+                edt_parsed = pd.to_datetime(rec.get('end_date'), format="%Y.%m.%d", errors='coerce')
+            else:
+                edt_parsed = pd.NaT
+            # Default to start_date + 21 days if parsed end is NaT
+            if pd.isna(edt_parsed) and not pd.isna(sdt):
+                default_edate = (sdt + timedelta(days=21)).date()
+            elif pd.isna(edt_parsed):
+                default_edate = today + timedelta(days=21)
+            else:
+                default_edate = edt_parsed.date()
+
+            edit_sdate = st.date_input(
+                "Start Date",
+                value=sdt.date() if not pd.isna(sdt) else today,
+                key='edit_sdate'
+            )
+            edit_edate = st.date_input(
+                "End Date",
+                value=default_edate,
+                key='edit_edate'
+            )
+            edit_note   = st.text_area("Note", value=rec.get('note',''), key='edit_note')
+            edit_day15  = st.text_input("Day 15 Info", value=rec.get('day15',''), key='edit_day15')
+            edit_day21  = st.text_input("Day 21 Info", value=rec.get('day21',''), key='edit_day21')
+            edit_banking= st.text_input("Banking Info", value=rec.get('banking',''), key='edit_banking')
+
+            # --- Cell Count Table Editor ---
+            st.subheader("Cell count information")
+            cols = ["A", "B", "C"] + [str(i) for i in range(1, 16)]
+            cell_index = ["Day 15", "Day 21", "Banking"]
+            counts_file = os.path.join(BATCH_DIR, f"batch_{bid}.xlsx")
+            if os.path.exists(counts_file):
+                try:
+                    cell_df = pd.read_excel(counts_file, sheet_name="cell_counts", index_col=0)
+                except:
+                    cell_df = pd.DataFrame(index=cell_index, columns=cols)
+            else:
+                cell_df = pd.DataFrame(index=cell_index, columns=cols)
+            edited_cell_df = st.data_editor(cell_df, use_container_width=True)
+
+            if st.button("Update Batch Information"):
+                new_row = {
+                    "batch_id": str(bid),
+                    "cell": edit_cell,
+                    "start_date": edit_sdate.strftime("%Y.%m.%d"),
+                    "end_date": edit_edate.strftime("%Y.%m.%d") if edit_edate else "",
+                    "note": edit_note,
+                    "day15": edit_day15,
+                    "day21": edit_day21,
+                    "banking": edit_banking
+                }
+                # Save updated summary and cell counts into the same Excel file
+                with ExcelWriter(counts_file) as writer:
+                    pd.DataFrame([new_row]).to_excel(writer, sheet_name="info", index=False)
+                    edited_cell_df.to_excel(writer, sheet_name="cell_counts")
+                st.success(f"Batch {bid} updated.")
+        else:
+            st.error(f"Batch {bid} not found.")
+
+# ---------------------- Image Viewer ----------------------
+if st.session_state['view'] == 'Image Viewer':
+    # The following code is adapted from BIOv1.py, excluding its own set_page_config(...) call
+
+    # Step 1: Upload image files
+    uploaded_files = st.file_uploader(
+        "Drag and drop image files here (JPEG/PNG), or click to browse",
+        type=["jpg", "jpeg", "png"],
+        accept_multiple_files=True
+    )
+
+    if uploaded_files:
+        image_files = uploaded_files
+        batch_pattern = re.compile(r"^DIF(\d+)_", re.IGNORECASE)
+    else:
+        st.info("Please upload image files to proceed.")
+        st.stop()
+
+    # Step 2: Group images by Batch ID, then by “DAY” prefix
+    batch_pattern = re.compile(r"^DIF(\d+)_", re.IGNORECASE)
+    day_pattern   = re.compile(r"_D(\d+)_", re.IGNORECASE)
+    batch_groups  = {}
+
+    # Build batch_groups: {batch_id: [UploadedFile, ...], ...}
+    for uploaded_file in image_files:
+        fname = uploaded_file.name
+        m = batch_pattern.search(fname)
+        if m:
+            bid = m.group(1)
+        else:
+            bid = "Unknown"
+        batch_groups.setdefault(bid, []).append(uploaded_file)
+
+
+    # Step 3: For each batch, show batch info from Excel, then group by day and display images
+    sorted_groups = {}
+    for bid, files_in_batch in sorted(batch_groups.items(), key=lambda x: int(x[0]) if x[0].isdigit() else 999):
+        # Load and display batch info from Excel
+        counts_file = os.path.join(BATCH_DIR, f"batch_{bid}.xlsx")
+        if os.path.exists(counts_file):
+            df_info = pd.read_excel(counts_file, sheet_name="info", dtype=str)
+            if not df_info.empty:
+                info = df_info.iloc[0].to_dict()
+                st.subheader(f"Batch {bid} Information")
+                st.write(f"**Cell Type:** {info.get('cell', '')}")
+                st.write(f"**Start Date:** {info.get('start_date', '')}")
+                st.write(f"**End Date:** {info.get('end_date', '')}")
+                st.write(f"**Note:** {info.get('note', '')}")
+                st.write(f"**Day 15 Info:** {info.get('day15', '')}")
+                st.write(f"**Day 21 Info:** {info.get('day21', '')}")
+                st.write(f"**Banking Info:** {info.get('banking', '')}")
+                # Display cell_counts sheet
+                try:
+                    df_counts = pd.read_excel(counts_file, sheet_name="cell_counts", index_col=0)
+                    st.subheader("Cell Counts")
+                    st.dataframe(df_counts, use_container_width=True)
+                except:
+                    st.info("No cell counts data available.")
+        else:
+            st.subheader(f"Batch {bid} (Info not found)")
+        # Group this batch's files by day
+        day_groups = {}
+        for f in files_in_batch:
+            fname = f.name
+            m = day_pattern.search(fname)
+            if m:
+                day = m.group(1)
+            else:
+                day = "Unknown"
+            day_groups.setdefault(day, []).append(f)
+        # Display each day group
+        for day, files in sorted(day_groups.items(), key=lambda x: int(x[0]) if x[0].isdigit() else 999):
+            st.markdown(f"**Day {day}**")
+            # Show images in rows of four for this day
+            for i in range(0, len(files), 4):
+                chunk = files[i:i+4]
+                cols4 = st.columns(4)
+                for idx, fobj in enumerate(chunk):
+                    try:
+                        img_disp = Image.open(fobj)
+                        cols4[idx].image(img_disp, caption=fobj.name, use_container_width=True)
+                    except:
+                        cols4[idx].empty()
+                # Fill remaining columns if fewer than 4
+                for idx in range(len(chunk), 4):
+                    cols4[idx].empty()
