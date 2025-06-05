@@ -1,0 +1,3 @@
+batch_id,cell,start_date,note,initial_plate_count,replaced_plate_count,end_date
+4,C4_c_P36_d3(200),2025.5.27,"- count: 1000 cells/uL 
+- incubation before seeding",3,0,
