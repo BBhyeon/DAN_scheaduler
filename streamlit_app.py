@@ -129,11 +129,9 @@ if not st.session_state.get("logged_in", False) and st.session_state.get("show_c
 if not st.session_state.get("logged_in", False):
     st.stop()
 
-# Set up user-specific batch directory
+# We use GitHub as the backend for batch storage — no local folder needed
 username = st.session_state["username"]
-USER_BATCH_DIR = os.path.join("batches", username)
-BATCH_DIR = USER_BATCH_DIR
-os.makedirs(BATCH_DIR, exist_ok=True)
+BATCH_DIR = f"batches/{username}"  # logical path in GitHub repo
 PROTOCOL_FILE = "DAP_protocol_extended.xlsx"
 
 # ---------------------- TOP-BAR NAVIGATION ----------------------
@@ -171,71 +169,37 @@ def save_batch(row):
 
 def load_batches():
     """
-    Loads all batch_<id>.xlsx files from BATCH_DIR.
-    Each Excel has:
-      - Sheet "info": summary with columns ['batch_id','cell','start_date','end_date','note','day15','day21','banking']
-      - Sheet "cell_counts": cell count table (ignored here for calendar view)
-    Returns a DataFrame with columns:
-      ['batch_id','start_date','end_date','cell','note','day15','day21','banking']
+    Fetches all batch_<id>.xlsx files for the logged-in user from GitHub.
+    Returns a DataFrame with summary info from each file’s “info” sheet.
     """
     batches_list = []
-    for fn in os.listdir(BATCH_DIR):
-        # Only consider Excel files named "batch_<id>.xlsx"
-        if fn.startswith("batch_") and fn.endswith(".xlsx"):
-            path = os.path.join(BATCH_DIR, fn)
-            try:
-                # Read summary info from "info" sheet
-                df_info = pd.read_excel(path, sheet_name="info", dtype=str)
-                if df_info.empty:
-                    continue
-                info_row = df_info.iloc[0].to_dict()
-                
-                # Safely extract fields, defaulting to empty string if missing
-                batch_id = info_row.get("batch_id", "")
-                cell     = info_row.get("cell", "")
-                note     = info_row.get("note", "")
-                day15    = info_row.get("day15", "")
-                day21    = info_row.get("day21", "")
-                banking  = info_row.get("banking", "")
-
-                # Parse start_date
-                sd_raw = info_row.get("start_date", "")
-                try:
-                    sd = pd.to_datetime(sd_raw, format="%Y.%m.%d", errors="coerce").date()
-                except:
-                    sd = None
-
-                # Parse end_date or default to start_date + 21 days
-                ed_raw = info_row.get("end_date", "")
-                if not ed_raw:
-                    if sd:
-                        ed = sd + timedelta(days=21)
-                    else:
-                        ed = None
-                else:
-                    try:
-                        ed = pd.to_datetime(ed_raw, format="%Y.%m.%d", errors="coerce").date()
-                    except:
-                        ed = sd + timedelta(days=21) if sd else None
-
-                # Build a dict for this batch
-                row = {
-                    "batch_id": batch_id,
-                    "start_date": sd,
-                    "end_date": ed,
-                    "cell": cell,
-                    "note": note,
-                    "day15": day15,
-                    "day21": day21,
-                    "banking": banking
-                }
-                batches_list.append(row)
-            except:
+    for fname, bio in fetch_user_batches(username):
+        try:
+            df_info = pd.read_excel(bio, sheet_name="info", dtype=str)
+            if df_info.empty:
                 continue
-
+            info_row = df_info.iloc[0].to_dict()
+            sd = pd.to_datetime(info_row.get("start_date",""), format="%Y.%m.%d", errors="coerce").date()
+            ed_raw = info_row.get("end_date","")
+            if ed_raw:
+                ed = pd.to_datetime(ed_raw, format="%Y.%m.%d", errors="coerce").date()
+            else:
+                ed = sd + timedelta(days=21) if sd else None
+            row = {
+                "batch_id": info_row.get("batch_id",""),
+                "start_date": sd,
+                "end_date": ed,
+                "cell": info_row.get("cell",""),
+                "note": info_row.get("note",""),
+                "day15": info_row.get("day15",""),
+                "day21": info_row.get("day21",""),
+                "banking": info_row.get("banking","")
+            }
+            batches_list.append(row)
+        except:
+            continue
     if batches_list:
         df_all = pd.DataFrame(batches_list)
-        # Ensure correct column order
         return df_all[["batch_id","start_date","end_date","cell","note","day15","day21","banking"]]
     else:
         return pd.DataFrame(
@@ -535,6 +499,8 @@ if st.session_state['view'] == 'Batch Manager':
             with ExcelWriter(counts_file) as writer:
                 pd.DataFrame([row]).to_excel(writer, sheet_name="info", index=False)
                 edited_cell_df.to_excel(writer, sheet_name="cell_counts")
+            # Persist new batch file to GitHub
+            commit_batch_to_github(username, new_bid, counts_file)
             st.success(f"Batch {new_bid} added.")
 
     elif st.session_state['mode'] == 'edit':
@@ -608,6 +574,8 @@ if st.session_state['view'] == 'Batch Manager':
                 with ExcelWriter(counts_file) as writer:
                     pd.DataFrame([new_row]).to_excel(writer, sheet_name="info", index=False)
                     edited_cell_df.to_excel(writer, sheet_name="cell_counts")
+                # Persist updated batch file to GitHub
+                commit_batch_to_github(username, bid, counts_file)
                 st.success(f"Batch {bid} updated.")
         else:
             st.error(f"Batch {bid} not found.")
