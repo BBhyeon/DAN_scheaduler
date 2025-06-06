@@ -8,6 +8,49 @@ import re
 from PIL import Image
 from streamlit_sortables import sort_items
 
+import io, base64
+from github import Github
+
+# Initialize GitHub client using Secret token
+GITHUB_TOKEN = st.secrets.get("GITHUB_TOKEN")
+gh = Github(GITHUB_TOKEN)
+repo = gh.get_repo("BBhyeon/DAN_scheaduler")
+
+def commit_batch_to_github(username, batch_id, local_path):
+    repo_path = f"batches/{username}/batch_{batch_id}.xlsx"
+    with open(local_path, "rb") as f:
+        data_bytes = f.read()
+    data_b64 = base64.b64encode(data_bytes).decode()
+    try:
+        existing = repo.get_contents(repo_path, ref="main")
+        repo.update_file(
+            path=repo_path,
+            message=f"Update batch {batch_id} for {username}",
+            content=data_b64,
+            sha=existing.sha,
+            branch="main"
+        )
+    except:
+        repo.create_file(
+            path=repo_path,
+            message=f"Add batch {batch_id} for {username}",
+            content=data_b64,
+            branch="main"
+        )
+
+def fetch_user_batches(username):
+    prefix = f"batches/{username}/"
+    out = []
+    try:
+        contents = repo.get_contents(prefix, ref="main")
+        for file in contents:
+            if file.name.endswith(".xlsx"):
+                data_bytes = base64.b64decode(file.content)
+                out.append((file.name, io.BytesIO(data_bytes)))
+    except:
+        pass
+    return out
+
 st.set_page_config(page_title="DAC_manager_v11", layout="wide")
 
 # Initialize session state flags if not present
