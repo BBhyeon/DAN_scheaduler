@@ -16,7 +16,27 @@ GITHUB_TOKEN = st.secrets.get("GITHUB_TOKEN")
 gh = Github(GITHUB_TOKEN)
 repo = gh.get_repo("BBhyeon/DAN_scheaduler")
 
+
+# Helper to ensure user's folder exists in GitHub
+def ensure_user_folder(username):
+    """
+    Creates the batches/<username>/ folder in GitHub by placing a .gitkeep if it doesn't exist.
+    """
+    folder_path = f"batches/{username}/.gitkeep"
+    try:
+        repo.get_contents(folder_path, ref="main")
+    except Exception:
+        # create an empty .gitkeep to initialize the folder
+        repo.create_file(
+            path=folder_path,
+            message=f"Initialize folder for {username}",
+            content="",
+            branch="main"
+        )
+
 def commit_batch_to_github(username, batch_id, local_path):
+    # ensure the user folder exists
+    ensure_user_folder(username)
     repo_path = f"batches/{username}/batch_{batch_id}.xlsx"
     with open(local_path, "rb") as f:
         data_bytes = f.read()
