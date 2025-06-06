@@ -38,6 +38,7 @@ def commit_batch_to_github(username, batch_id, local_path):
             branch="main"
         )
 
+@st.cache_data(ttl=600)
 def fetch_user_batches(username):
     prefix = f"batches/{username}/"
     out = []
