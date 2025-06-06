@@ -685,29 +685,43 @@ if st.session_state['view'] == 'Image Viewer':
     # Step 3: For each batch, show batch info from Excel, then group by day and display images
     sorted_groups = {}
     for bid, files_in_batch in sorted(batch_groups.items(), key=lambda x: int(x[0]) if x[0].isdigit() else 999):
-        # Load and display batch info from Excel
-        counts_file = os.path.join(BATCH_DIR, f"batch_{bid}.xlsx")
-        if os.path.exists(counts_file):
-            df_info = pd.read_excel(counts_file, sheet_name="info", dtype=str)
-            if not df_info.empty:
-                info = df_info.iloc[0].to_dict()
-                st.subheader(f"Batch {bid} Information")
-                st.write(f"**Cell Type:** {info.get('cell', '')}")
-                st.write(f"**Start Date:** {info.get('start_date', '')}")
-                st.write(f"**End Date:** {info.get('end_date', '')}")
-                st.write(f"**Note:** {info.get('note', '')}")
-                st.write(f"**Day 15 Info:** {info.get('day15', '')}")
-                st.write(f"**Day 21 Info:** {info.get('day21', '')}")
-                st.write(f"**Banking Info:** {info.get('banking', '')}")
-                # Display cell_counts sheet
+        # Load and display batch info from GitHub
+        df_info = None
+        for fname, bio in fetch_user_batches(username):
+            if fname == f"batch_{bid}.xlsx":
                 try:
-                    df_counts = pd.read_excel(counts_file, sheet_name="cell_counts", index_col=0)
-                    st.subheader("Cell Counts")
-                    st.dataframe(df_counts, use_container_width=True)
+                    df_info = pd.read_excel(bio, sheet_name="info", dtype=str)
                 except:
-                    st.info("No cell counts data available.")
+                    df_info = None
+                break
+        if df_info is not None and not df_info.empty:
+            info = df_info.iloc[0].to_dict()
+            st.subheader(f"Batch {bid} Information")
+            st.write(f"**Cell Type:** {info.get('cell', '')}")
+            st.write(f"**Start Date:** {info.get('start_date', '')}")
+            st.write(f"**End Date:** {info.get('end_date', '')}")
+            st.write(f"**Note:** {info.get('note', '')}")
+            st.write(f"**Day 15 Info:** {info.get('day15', '')}")
+            st.write(f"**Day 21 Info:** {info.get('day21', '')}")
+            st.write(f"**Banking Info:** {info.get('banking', '')}")
         else:
             st.subheader(f"Batch {bid} (Info not found)")
+
+        # Display cell_counts sheet from GitHub
+        df_counts = None
+        for fname, bio in fetch_user_batches(username):
+            if fname == f"batch_{bid}.xlsx":
+                try:
+                    df_counts = pd.read_excel(bio, sheet_name="cell_counts", index_col=0)
+                except:
+                    df_counts = None
+                break
+        if df_counts is not None:
+            st.subheader("Cell Counts")
+            st.dataframe(df_counts, use_container_width=True)
+        else:
+            st.info("No cell counts data available.")
+
         # Group this batch's files by day
         day_groups = {}
         for f in files_in_batch:
