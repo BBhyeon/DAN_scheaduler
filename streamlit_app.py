@@ -348,21 +348,20 @@ def style_calendar(df: pd.DataFrame, today: datetime.date, **kwargs):
 if 'view' not in st.session_state:
     st.session_state['view'] = 'Calendar'
 
-# Load batches and filter to those still within Day ≤ 21
-batches = load_batches()
 today = datetime.today().date()
-if not batches.empty:
-    full_cal = make_calendar(batches, today)
-    valid_ids = []
-    today_key = (str(today.year), today.strftime('%b'), today.strftime('%a %d'))
-    for bid in full_cal.index:
-        val = full_cal.loc[bid, today_key]
-        if pd.notna(val) and int(val) <= 21:
-            valid_ids.append(str(bid))
-    batches = batches[batches['batch_id'].astype(str).isin(valid_ids)].reset_index(drop=True)
 
 # ---------------------- Differentiation Calendar ----------------------
 if st.session_state['view'] == 'Calendar':
+    batches = load_batches()
+    if not batches.empty:
+        full_cal = make_calendar(batches, today)
+        valid_ids = []
+        today_key = (str(today.year), today.strftime('%b'), today.strftime('%a %d'))
+        for bid in full_cal.index:
+            val = full_cal.loc[bid, today_key]
+            if pd.notna(val) and int(val) <= 21:
+                valid_ids.append(str(bid))
+        batches = batches[batches['batch_id'].astype(str).isin(valid_ids)].reset_index(drop=True)
     st.subheader("📆 Differentiation Calendar")
     if batches.empty:
         st.info("No ongoing batches to display.")
@@ -373,8 +372,19 @@ if st.session_state['view'] == 'Calendar':
         # Display scheme image below calendar
         st.image("scheme.png", use_container_width=True)
 
+
 # ---------------------- Today's Batch Tasks ----------------------
 if st.session_state['view'] == 'Tasks':
+    batches = load_batches()
+    if not batches.empty:
+        full_cal = make_calendar(batches, today)
+        valid_ids = []
+        today_key = (str(today.year), today.strftime('%b'), today.strftime('%a %d'))
+        for bid in full_cal.index:
+            val = full_cal.loc[bid, today_key]
+            if pd.notna(val) and int(val) <= 21:
+                valid_ids.append(str(bid))
+        batches = batches[batches['batch_id'].astype(str).isin(valid_ids)].reset_index(drop=True)
     st.subheader("📌 Batch Tasks")
     selected_date = st.date_input("Select Date", value=today, key='task_date')
     if batches.empty:
@@ -505,6 +515,17 @@ if st.session_state['view'] == 'Tasks':
 
 # ---------------------- Batch Manager ----------------------
 if st.session_state['view'] == 'Batch Manager':
+    batches = load_batches()
+    if not batches.empty:
+        full_cal = make_calendar(batches, today)
+        valid_ids = []
+        today_key = (str(today.year), today.strftime('%b'), today.strftime('%a %d'))
+        for bid in full_cal.index:
+            val = full_cal.loc[bid, today_key]
+            if pd.notna(val) and int(val) <= 21:
+                valid_ids.append(str(bid))
+        batches = batches[batches['batch_id'].astype(str).isin(valid_ids)].reset_index(drop=True)
+
     st.subheader("📋 Batch Manager")
 
     if 'mode' not in st.session_state or st.session_state['mode'] == 'none':
@@ -523,6 +544,17 @@ if st.session_state['view'] == 'Batch Manager':
         if st.button("Load"):
             st.session_state['mode'] = 'edit'
             st.session_state['edit_id'] = int(load_bid)
+            # Reload batches after Load button click to ensure new files appear
+            batches = load_batches()
+            if not batches.empty:
+                full_cal = make_calendar(batches, today)
+                valid_ids = []
+                today_key = (str(today.year), today.strftime('%b'), today.strftime('%a %d'))
+                for bid in full_cal.index:
+                    val = full_cal.loc[bid, today_key]
+                    if pd.notna(val) and int(val) <= 21:
+                        valid_ids.append(str(bid))
+                batches = batches[batches['batch_id'].astype(str).isin(valid_ids)].reset_index(drop=True)
 
     if st.session_state['mode'] == 'add':
         st.subheader("Batch Information")
@@ -572,11 +604,34 @@ if st.session_state['view'] == 'Batch Manager':
             # Persist new batch file to GitHub
             commit_batch_to_github(username, new_bid, counts_file)
             fetch_user_batches.clear()
+            # Reload batches after saving
+            batches = load_batches()
+            if not batches.empty:
+                full_cal = make_calendar(batches, today)
+                valid_ids = []
+                today_key = (str(today.year), today.strftime('%b'), today.strftime('%a %d'))
+                for bid in full_cal.index:
+                    val = full_cal.loc[bid, today_key]
+                    if pd.notna(val) and int(val) <= 21:
+                        valid_ids.append(str(bid))
+                batches = batches[batches['batch_id'].astype(str).isin(valid_ids)].reset_index(drop=True)
             st.success(f"Batch {new_bid} added.")
 
     elif st.session_state['mode'] == 'edit':
         bid = st.session_state['edit_id']
+        counts_file = os.path.join(BATCH_DIR, f"batch_{bid}.xlsx")
         st.subheader(f"Batch Information #{bid}")
+        # Reload batches before displaying edit form (ensure latest)
+        batches = load_batches()
+        if not batches.empty:
+            full_cal = make_calendar(batches, today)
+            valid_ids = []
+            today_key = (str(today.year), today.strftime('%b'), today.strftime('%a %d'))
+            for ebid in full_cal.index:
+                val = full_cal.loc[ebid, today_key]
+                if pd.notna(val) and int(val) <= 21:
+                    valid_ids.append(str(ebid))
+            batches = batches[batches['batch_id'].astype(str).isin(valid_ids)].reset_index(drop=True)
         # Load batch info from GitHub
         rec = pd.DataFrame()
         for fname, bio in fetch_user_batches(username):
@@ -652,6 +707,17 @@ if st.session_state['view'] == 'Batch Manager':
                 # Persist updated batch file to GitHub
                 commit_batch_to_github(username, bid, counts_file)
                 fetch_user_batches.clear()
+                # Reload batches after updating
+                batches = load_batches()
+                if not batches.empty:
+                    full_cal = make_calendar(batches, today)
+                    valid_ids = []
+                    today_key = (str(today.year), today.strftime('%b'), today.strftime('%a %d'))
+                    for ebid in full_cal.index:
+                        val = full_cal.loc[ebid, today_key]
+                        if pd.notna(val) and int(val) <= 21:
+                            valid_ids.append(str(ebid))
+                    batches = batches[batches['batch_id'].astype(str).isin(valid_ids)].reset_index(drop=True)
                 st.success(f"Batch {bid} updated.")
         else:
             st.error(f"Batch {bid} not found.")
