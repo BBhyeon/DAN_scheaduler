@@ -569,6 +569,7 @@ if st.session_state['view'] == 'Batch Manager':
                 edited_cell_df.to_excel(writer, sheet_name="cell_counts")
             # Persist new batch file to GitHub
             commit_batch_to_github(username, new_bid, counts_file)
+            fetch_user_batches.clear()
             st.success(f"Batch {new_bid} added.")
 
     elif st.session_state['mode'] == 'edit':
@@ -648,6 +649,7 @@ if st.session_state['view'] == 'Batch Manager':
                     edited_cell_df.to_excel(writer, sheet_name="cell_counts")
                 # Persist updated batch file to GitHub
                 commit_batch_to_github(username, bid, counts_file)
+                fetch_user_batches.clear()
                 st.success(f"Batch {bid} updated.")
         else:
             st.error(f"Batch {bid} not found.")
