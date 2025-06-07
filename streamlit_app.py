@@ -240,6 +240,8 @@ def load_batches():
     Fetches all batch_<id>.xlsx files for the logged-in user from GitHub.
     Returns a DataFrame with summary info from each file’s “info” sheet.
     """
+    # ensure we fetch the latest files from GitHub each call
+    fetch_user_batches.clear()
     batches_list = []
     for fname, bio in fetch_user_batches(username):
         try:
