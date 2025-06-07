@@ -574,13 +574,16 @@ if st.session_state['view'] == 'Batch Manager':
     elif st.session_state['mode'] == 'edit':
         bid = st.session_state['edit_id']
         st.subheader(f"Batch Information #{bid}")
-        # Load batch info directly from the batch_<id>.xlsx 'info' sheet
-        counts_file = os.path.join(BATCH_DIR, f"batch_{bid}.xlsx")
-        if os.path.exists(counts_file):
-            df_info = pd.read_excel(counts_file, sheet_name="info", dtype=str)
-            rec = df_info.iloc[0:1]
-        else:
-            rec = pd.DataFrame()
+        # Load batch info from GitHub
+        rec = pd.DataFrame()
+        for fname, bio in fetch_user_batches(username):
+            if fname == f"batch_{bid}.xlsx":
+                try:
+                    df_info = pd.read_excel(bio, sheet_name="info", dtype=str)
+                    rec = df_info.iloc[0:1]
+                except:
+                    rec = pd.DataFrame()
+                break
         if not rec.empty:
             rec = rec.iloc[0]
             edit_cell = st.text_input("Cell Type", value=rec.get('cell',''), key='edit_cell')
@@ -617,14 +620,15 @@ if st.session_state['view'] == 'Batch Manager':
             st.subheader("Cell count information")
             cols = ["A", "B", "C"] + [str(i) for i in range(1, 16)]
             cell_index = ["Day 15", "Day 21", "Banking"]
-            counts_file = os.path.join(BATCH_DIR, f"batch_{bid}.xlsx")
-            if os.path.exists(counts_file):
-                try:
-                    cell_df = pd.read_excel(counts_file, sheet_name="cell_counts", index_col=0)
-                except:
-                    cell_df = pd.DataFrame(index=cell_index, columns=cols)
-            else:
-                cell_df = pd.DataFrame(index=cell_index, columns=cols)
+            # Load cell counts from GitHub
+            cell_df = pd.DataFrame(index=cell_index, columns=cols)
+            for fname, bio in fetch_user_batches(username):
+                if fname == f"batch_{bid}.xlsx":
+                    try:
+                        cell_df = pd.read_excel(bio, sheet_name="cell_counts", index_col=0)
+                    except:
+                        pass
+                    break
             edited_cell_df = st.data_editor(cell_df, use_container_width=True)
 
             if st.button("Update Batch Information"):
