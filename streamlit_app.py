@@ -100,7 +100,7 @@ with top_bar:
                         st.error("Invalid username or password.")
                     else:
                         stored_pw = accounts_df.set_index("username").at[username, "password"]
-                        if password != stored_pw:
+                        if password != str(stored_pw):
                             st.error("Invalid username or password.")
                         else:
                             st.session_state["logged_in"] = True
