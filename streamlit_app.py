@@ -161,21 +161,29 @@ if "view" not in st.session_state:
 
 # ---------------------- Calendar View ----------------------
 def make_calendar(df, today, length=22):
-    dates = [today+timedelta(days=i) for i in range(length)]
+    dates = [today + timedelta(days=i) for i in range(length)]
     cols = pd.MultiIndex.from_tuples(
         [(d.year, d.strftime("%b"), d.strftime("%a %d")) for d in dates],
         names=["Year","Month","Day"]
     )
-    cal = pd.DataFrame(index=df.batch_id.astype(str), columns=cols)
-    for _,r in df.iterrows():
-        sd,ed = r.start_date, r.end_date or (r.start_date+timedelta(days=length))
+    # initialize empty calendar
+    cal = pd.DataFrame(index=df.batch_id.astype(str), columns=cols, dtype=object).fillna("")
+    for _, r in df.iterrows():
+        sd = r.start_date
+        # if end_date is missing, assume length days out (but skip if start_date is NaT)
+        ed = (sd + timedelta(days=length)) if pd.notna(sd) else None
+        if pd.notna(r.end_date):
+            ed = r.end_date
+        if pd.isna(sd) or ed is None:
+            continue
         idx = sd
         di = 0
-        while idx<=ed:
+        while idx <= ed:
             if idx in dates:
-                key=(idx.year, idx.strftime("%b"), idx.strftime("%a %d"))
-                cal.loc[str(r.batch_id),key]=di
-            idx+=timedelta(days=1); di+=1
+                key = (idx.year, idx.strftime("%b"), idx.strftime("%a %d"))
+                cal.at[str(r.batch_id), key] = di
+            idx += timedelta(days=1)
+            di += 1
     return cal
 
 def style_cal(df, today):
