@@ -2,10 +2,10 @@ import streamlit as st
 st.set_page_config(page_title="DAC_manager_v11", layout="wide")
 
 # Persist login via URL query parameter
-params = st.experimental_get_query_params()
+params = st.query_params
 if "user" in params and params["user"]:
     st.session_state["username"] = params["user"][0]
-    st.session_state["logged_in"] = Tru
+    st.session_state["logged_in"] = True
 
 import pandas as pd
 from pandas import ExcelWriter
