@@ -39,7 +39,13 @@ ws_accounts = next(ws for ws in sh.worksheets() if ws.id == GID_ACCOUNTS)
 @st.cache_data(ttl=300)
 def load_accounts():
     records = ws_accounts.get_all_records()
-    return pd.DataFrame(records)
+    df = pd.DataFrame(records)
+    # Ensure username and password columns exist
+    required = ["username", "password"]
+    for col in required:
+        if col not in df.columns:
+            df[col] = ""
+    return df[required]
 
 st.set_page_config(page_title="DAC_manager_v11", layout="wide")
 
