@@ -32,6 +32,14 @@ sh    = gc.open_by_key(SHEET_ID)
 ws_info   = sh.worksheet("info")
 ws_counts = sh.worksheet("cell_counts")
 
+# Load accounts from Google Sheet
+ws_accounts = sh.worksheet("account")
+
+@st.cache_data(ttl=300)
+def load_accounts():
+    records = ws_accounts.get_all_records()
+    return pd.DataFrame(records)
+
 st.set_page_config(page_title="DAC_manager_v11", layout="wide")
 
 # Initialize session state flags if not present
@@ -40,17 +48,16 @@ if "logged_in" not in st.session_state:
 if "show_create" not in st.session_state:
     st.session_state["show_create"] = False
 
-# ---------------------- CREDENTIALS from Secrets ----------------------
-# Use the STATIC map of username/passwords from Streamlit Secrets
-credentials = st.secrets["CREDENTIALS"]
+## ---------------------- CREDENTIALS from Secrets ----------------------
+# (Removed static credentials; now using Google Sheet for accounts)
 
-# ---------------------- TOP-BAR LOGIN & ACCOUNT CREATION ----------------------
+## ---------------------- TOP-BAR LOGIN & ACCOUNT CREATION ----------------------
 # Restore login from URL params if present
 params = st.query_params
 if "user" in params and params["user"]:
     param_user = params["user"][0]
-    all_creds = credentials
-    if param_user in all_creds:
+    accounts_df = load_accounts()
+    if param_user in accounts_df["username"].astype(str).tolist():
         st.session_state["logged_in"] = True
         st.session_state["username"] = param_user
         USER_BATCH_DIR = os.path.join("batches", param_user)
@@ -79,17 +86,23 @@ with top_bar:
             if st.button("Login"):
                 if not username or not password:
                     st.warning("Please enter both username and password.")
-                elif username not in credentials or credentials[username] != password:
-                    st.error("Invalid username or password.")
                 else:
-                    st.session_state["logged_in"] = True
-                    st.session_state["username"] = username
-                    USER_BATCH_DIR = os.path.join("batches", username)
-                    os.makedirs(USER_BATCH_DIR, exist_ok=True)
-                    try:
-                        st.experimental_set_query_params(user=username)
-                    except Exception:
-                        pass
+                    accounts_df = load_accounts()
+                    # verify username exists
+                    if username not in accounts_df["username"].astype(str).tolist():
+                        st.error("Invalid username or password.")
+                    else:
+                        stored_pw = accounts_df.set_index("username").at[username, "password"]
+                        if password != stored_pw:
+                            st.error("Invalid username or password.")
+                        else:
+                            st.session_state["logged_in"] = True
+                            st.session_state["username"]  = username
+                            os.makedirs(os.path.join("batches", username), exist_ok=True)
+                            try:
+                                st.experimental_set_query_params(user=username)
+                            except:
+                                pass
         else:
             cols[3].markdown("")
 
@@ -114,13 +127,15 @@ if not st.session_state.get("logged_in", False) and st.session_state.get("show_c
     new_user = st.text_input("New Username", key="main_new_user")
     new_pass = st.text_input("New Password", type="password", key="main_new_pass")
     if st.button("Save Account", key="main_save_account"):
+        accounts_df = load_accounts()
         if not new_user or not new_pass:
             st.error("Please enter both username and password.")
-        elif new_user in credentials:
+        elif new_user in accounts_df["username"].astype(str).tolist():
             st.error("Username already exists.")
         else:
-            st.error("Account creation is disabled (static credentials from secrets).")
-            # If you want to allow account creation, you must update Streamlit secrets and redeploy.
+            ws_accounts.append_row([new_user, new_pass])
+            load_accounts.clear()
+            st.success(f"Account '{new_user}' created. Please login.")
             st.session_state["show_create"] = False
     st.stop()
 
