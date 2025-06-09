@@ -17,11 +17,24 @@ st.set_page_config(page_title="DAC_manager_v11", layout="wide")
 # ---------------------- SECRETS & SHEETS SETUP ----------------------
 # We load the service account JSON file (uploaded via Streamlit Cloud Files)
 KEYFILE = "my-sa-key.json"
+# Check that the key file was uploaded
+if not os.path.exists(KEYFILE):
+    st.error(f"Missing service account key file: {KEYFILE}. Please upload it via the app Settings → Files.")
+    st.stop()
 scope   = ["https://www.googleapis.com/auth/spreadsheets"]
 creds   = ServiceAccountCredentials.from_json_keyfile_name(KEYFILE, scope)
 gc      = gspread.authorize(creds)
-# Sheet ID is stored in plain secrets
-SHEET_ID     = st.secrets["SHEET_ID"]
+# Public Google Sheet URL for batch data
+SHEET_URL = "https://docs.google.com/spreadsheets/d/1Mptw9CCbi0fWRANxyRm1p-WeQRoGQAWkx3yGhlV9HSU/edit?usp=sharing"
+# Extract the sheet ID from the URL
+import re as _re  # already imported above, but alias to avoid collision
+match = _re.search(r"/d/([a-zA-Z0-9-_]+)", SHEET_URL)
+if not match:
+    st.error(f"Could not parse sheet ID from URL: {SHEET_URL}")
+    st.stop()
+SHEET_ID = match.group(1)
+
+# Open worksheets
 sheet_info   = gc.open_by_key(SHEET_ID).worksheet("info")
 sheet_counts = gc.open_by_key(SHEET_ID).worksheet("cell_counts")
 
