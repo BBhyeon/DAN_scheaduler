@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import requests
 from pandas import ExcelWriter
 from datetime import datetime, timedelta
 import os
@@ -8,63 +9,68 @@ import re
 from PIL import Image
 from streamlit_sortables import sort_items
 
-# Google Sheets client
-import gspread
-from oauth2client.client import GoogleCredentials
-import re
-
 st.set_page_config(page_title="DAC_manager_v11", layout="wide")
 
-# ---------------------- SHEETS SETUP (public URL) ----------------------
-# Use a publicly-shared Google Sheet:
-SHARE_URL = "https://docs.google.com/spreadsheets/d/1Mptw9CCbi0fWRANxyRm1p-WeQRoGQAWkx3yGhlV9HSU/edit?usp=sharing"
-# Extract the sheet ID from the sharing URL
-match = re.search(r"/d/([a-zA-Z0-9-_]+)", SHARE_URL)
-if not match:
-    st.error(f"Could not parse sheet ID from URL: {SHARE_URL}")
-    st.stop()
-SHEET_ID = match.group(1)
+# ——— Google Sheets via REST + CSV exports ———
+# Your sheet (publicly shared) ID and GIDs:
+SHEET_ID   = st.secrets["SHEET_ID"]
+GID_INFO   = st.secrets["GID_INFO"]
+GID_COUNTS = st.secrets["GID_COUNTS"]
 
-# Authorize using application default credentials (sheet must be "anyone with link can edit")
-gc = gspread.authorize(GoogleCredentials.get_application_default())
+CSV_INFO   = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_INFO}"
+CSV_COUNTS = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_COUNTS}"
 
-# Open the 'info' and 'cell_counts' worksheets
-sheet_info   = gc.open_by_key(SHEET_ID).worksheet("info")
-sheet_counts = gc.open_by_key(SHEET_ID).worksheet("cell_counts")
+# API key stored securely in Streamlit Secrets
+API_KEY    = st.secrets["GSHEETS_API_KEY"]
+
+@st.cache_data(ttl=300)
+def load_info_df():
+    return pd.read_csv(CSV_INFO)
+
+@st.cache_data(ttl=300)
+def load_counts_df():
+    return pd.read_csv(CSV_COUNTS)
+
+def overwrite_info(df: pd.DataFrame):
+    url = f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}/values/info!A1:Z"
+    params = {"valueInputOption":"USER_ENTERED", "key": API_KEY}
+    body = {
+        "range":"info!A1",
+        "majorDimension":"ROWS",
+        "values":[df.columns.tolist()] + df.values.tolist()
+    }
+    r = requests.put(url, params=params, json=body)
+    r.raise_for_status()
+
+def append_counts(rows: list[list]):
+    url = f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}/values/cell_counts!A1:Z:append"
+    params = {"valueInputOption":"USER_ENTERED", "key": API_KEY}
+    r = requests.post(url, params=params, json={"values": rows})
+    r.raise_for_status()
 
 # ---------------------- HELPERS ----------------------
 @st.cache_data(ttl=300)
 def load_batches_from_sheets(username):
-    df = pd.DataFrame(sheet_info.get_all_records())
+    df = load_info_df()
     df = df[df["username"] == username]
     df["start_date"] = pd.to_datetime(df["start_date"], errors="coerce").dt.date
     df["end_date"]   = pd.to_datetime(df["end_date"], errors="coerce").dt.date
     return df
 
 def save_batch_to_sheets(username, batch_id, info_row: dict, counts_df: pd.DataFrame):
-    # --- Info sheet update ---
-    all_info = pd.DataFrame(sheet_info.get_all_records())
-    mask = ~((all_info["username"]==username)&(all_info["batch_id"]==batch_id))
-    df_keep = all_info[mask].append(
-        {"username":username,"batch_id":batch_id,**info_row},
-        ignore_index=True
+    all_info = load_info_df()
+    keep = all_info[~((all_info.username==username)&(all_info.batch_id==batch_id))]
+    new_info_df = pd.concat([keep, pd.DataFrame([info_row])], ignore_index=True)
+    overwrite_info(new_info_df)
+
+    flat = (
+        counts_df.reset_index()
+          .melt(id_vars="index", var_name="phase", value_name="value")
+          .assign(username=username, batch_id=batch_id)
+          [["phase","variable","value","username","batch_id"]]
+          .values.tolist()
     )
-    sheet_info.clear()
-    sheet_info.update([df_keep.columns.tolist()] + df_keep.values.tolist())
-
-    # --- CellCounts sheet update ---
-    flat = counts_df.reset_index().melt(
-        id_vars="index", var_name="time", value_name="value"
-    ).rename(columns={"index":"phase"})
-    flat["username"] = username
-    flat["batch_id"] = batch_id
-
-    all_counts = pd.DataFrame(sheet_counts.get_all_records())
-    mask_c = ~((all_counts["username"]==username)&(all_counts["batch_id"]==batch_id))
-    dfc_keep = all_counts[mask_c].append(flat, ignore_index=True)
-
-    sheet_counts.clear()
-    sheet_counts.update([dfc_keep.columns.tolist()] + dfc_keep.values.tolist())
+    append_counts(flat)
 
 # ---------------------- AUTH ----------------------
 CRED_FILE = "credentials.json"
@@ -226,11 +232,25 @@ if st.session_state["view"]=="Batch Manager":
         edited = st.data_editor(dfc,use_container_width=True)
         if st.button("Save New Batch"):
             info = {
+                "username": username,
+                "batch_id": new_id,
                 "cell":c, "start_date":s.strftime("%Y.%m.%d"),
                 "end_date":e.strftime("%Y.%m.%d"), "note":n,
                 "day15":"", "day21":"", "banking":""
             }
-            save_batch_to_sheets(username,new_id,info,edited)
+            all_info = load_info_df()
+            keep = all_info[~((all_info.username==username)&(all_info.batch_id==new_id))]
+            new_info_df = pd.concat([keep, pd.DataFrame([info])], ignore_index=True)
+            overwrite_info(new_info_df)
+
+            flat = (
+              edited.reset_index()
+                .melt(id_vars="index", var_name="phase", value_name="value")
+                .assign(username=username, batch_id=new_id)
+                [["phase","variable","value","username","batch_id"]]
+                .values.tolist()
+            )
+            append_counts(flat)
             st.success(f"Batch {new_id} saved.")
     else:
         bid = st.number_input("Batch ID to Load",min_value=1,value=1)
@@ -249,11 +269,25 @@ if st.session_state["view"]=="Batch Manager":
             edited = st.data_editor(dfc,use_container_width=True)
             if st.button("Update Batch"):
                 info = {
+                    "username": username,
+                    "batch_id": bid,
                     "cell":c, "start_date":s.strftime("%Y.%m.%d"),
                     "end_date":e.strftime("%Y.%m.%d"), "note":n,
                     "day15":"", "day21":"", "banking":""
                 }
-                save_batch_to_sheets(username,bid,info,edited)
+                all_info = load_info_df()
+                keep = all_info[~((all_info.username==username)&(all_info.batch_id==bid))]
+                new_info_df = pd.concat([keep, pd.DataFrame([info])], ignore_index=True)
+                overwrite_info(new_info_df)
+
+                flat = (
+                  edited.reset_index()
+                    .melt(id_vars="index", var_name="phase", value_name="value")
+                    .assign(username=username, batch_id=bid)
+                    [["phase","variable","value","username","batch_id"]]
+                    .values.tolist()
+                )
+                append_counts(flat)
                 st.success(f"Batch {bid} updated.")
 
 # ---------------------- Image Viewer ----------------------
