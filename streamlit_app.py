@@ -8,33 +8,27 @@ import re
 from PIL import Image
 from streamlit_sortables import sort_items
 
-# Google Sheets imports
+# Google Sheets client
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+from oauth2client.client import GoogleCredentials
+import re
 
 st.set_page_config(page_title="DAC_manager_v11", layout="wide")
 
-# ---------------------- SECRETS & SHEETS SETUP ----------------------
-# We load the service account JSON file (uploaded via Streamlit Cloud Files)
-KEYFILE = "my-sa-key.json"
-# Check that the key file was uploaded
-if not os.path.exists(KEYFILE):
-    st.error(f"Missing service account key file: {KEYFILE}. Please upload it via the app Settings → Files.")
-    st.stop()
-scope   = ["https://www.googleapis.com/auth/spreadsheets"]
-creds   = ServiceAccountCredentials.from_json_keyfile_name(KEYFILE, scope)
-gc      = gspread.authorize(creds)
-# Public Google Sheet URL for batch data
-SHEET_URL = "https://docs.google.com/spreadsheets/d/1Mptw9CCbi0fWRANxyRm1p-WeQRoGQAWkx3yGhlV9HSU/edit?usp=sharing"
-# Extract the sheet ID from the URL
-import re as _re  # already imported above, but alias to avoid collision
-match = _re.search(r"/d/([a-zA-Z0-9-_]+)", SHEET_URL)
+# ---------------------- SHEETS SETUP (public URL) ----------------------
+# Use a publicly-shared Google Sheet:
+SHARE_URL = "https://docs.google.com/spreadsheets/d/1Mptw9CCbi0fWRANxyRm1p-WeQRoGQAWkx3yGhlV9HSU/edit?usp=sharing"
+# Extract the sheet ID from the sharing URL
+match = re.search(r"/d/([a-zA-Z0-9-_]+)", SHARE_URL)
 if not match:
-    st.error(f"Could not parse sheet ID from URL: {SHEET_URL}")
+    st.error(f"Could not parse sheet ID from URL: {SHARE_URL}")
     st.stop()
 SHEET_ID = match.group(1)
 
-# Open worksheets
+# Authorize using application default credentials (sheet must be "anyone with link can edit")
+gc = gspread.authorize(GoogleCredentials.get_application_default())
+
+# Open the 'info' and 'cell_counts' worksheets
 sheet_info   = gc.open_by_key(SHEET_ID).worksheet("info")
 sheet_counts = gc.open_by_key(SHEET_ID).worksheet("cell_counts")
 
