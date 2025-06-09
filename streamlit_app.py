@@ -574,7 +574,7 @@ if st.session_state['view'] == 'Batch Manager':
                 # Delete old info rows matching this batch (simple full-sheet rewrite recommended)
                 all_info = ws_info.get_all_records()
                 df_info = pd.DataFrame(all_info)
-                keep = df_info[~((df_info["username"]==username) & (df_info["batch_id"]==new_bid))]
+                keep = df_info[~((df_info["username"]==username) & (df_info["batch_id"]==bid))]
                 ws_info.clear()
                 ws_info.update([keep.columns.values.tolist()] + keep.values.tolist())
 
