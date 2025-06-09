@@ -1,4 +1,5 @@
 import streamlit as st
+st.set_page_config(page_title="DAC_manager_v11", layout="wide")
 
 # Persist login via URL query parameter
 params = st.experimental_get_query_params()
@@ -54,7 +55,6 @@ def load_accounts():
             df[col] = ""
     return df[required]
 
-st.set_page_config(page_title="DAC_manager_v11", layout="wide")
 
 # Initialize session state flags if not present
 if "logged_in" not in st.session_state:
