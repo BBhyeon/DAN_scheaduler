@@ -36,7 +36,11 @@ except KeyError:
 scope = ["https://spreadsheets.google.com/feeds","https://www.googleapis.com/auth/drive"]
 creds = ServiceAccountCredentials.from_json_keyfile_dict(GSPREAD_CRED, scope)
 gc    = gspread.authorize(creds)
-sh    = gc.open_by_key(SHEET_ID)
+try:
+    sh = gc.open_by_key(SHEET_ID)
+except Exception as e:
+    st.error(f"Failed to open Google Sheet (check permissions & API): {e}")
+    st.stop()
 ws_info   = sh.worksheet("info")
 ws_counts = sh.worksheet("cell_counts")
 
