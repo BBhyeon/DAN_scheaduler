@@ -15,13 +15,12 @@ from oauth2client.service_account import ServiceAccountCredentials
 st.set_page_config(page_title="DAC_manager_v11", layout="wide")
 
 # ---------------------- SECRETS & SHEETS SETUP ----------------------
-# Secrets:
-#   GSPREAD_CRED = """{ ... your service account JSON ... }"""
-#   SHEET_ID     = "1Mptw9CCbi0fWRANxyRm1p-WeQRoGQAWkx3yGhlV9HSU"
-scope = ["https://www.googleapis.com/auth/spreadsheets"]
-creds_dict = json.loads(st.secrets["GSPREAD_CRED"])
-creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-gc = gspread.authorize(creds)
+# We load the service account JSON file (uploaded via Streamlit Cloud Files)
+KEYFILE = "my-sa-key.json"
+scope   = ["https://www.googleapis.com/auth/spreadsheets"]
+creds   = ServiceAccountCredentials.from_json_keyfile_name(KEYFILE, scope)
+gc      = gspread.authorize(creds)
+# Sheet ID is stored in plain secrets
 SHEET_ID     = st.secrets["SHEET_ID"]
 sheet_info   = gc.open_by_key(SHEET_ID).worksheet("info")
 sheet_counts = gc.open_by_key(SHEET_ID).worksheet("cell_counts")
