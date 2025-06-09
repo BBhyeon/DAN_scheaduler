@@ -167,3 +167,4 @@ cython_debug/
 .DS_Store
 *.pyc
 /build/>>>>>>> 4c7434f (Add .gitignore)
+dac-manager-462419-bd3975e9af04.json
