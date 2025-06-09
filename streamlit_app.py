@@ -8,19 +8,12 @@ import re
 from PIL import Image
 from streamlit_sortables import sort_items
 
-import gspread
-from google.oauth2.service_account import Credentials
 
-# Google Sheets settings: stored as Streamlit secrets
-SHEET_ID = st.secrets["SHEET_ID"]
-CREDS_INFO = st.secrets["GSPREAD_CRED"]
-scope = ["https://www.googleapis.com/auth/spreadsheets"]
-creds = Credentials.from_service_account_info(CREDS_INFO, scopes=scope)
-gc = gspread.authorize(creds)
-
-# Worksheets
-ws_info = gc.open_by_key(SHEET_ID).worksheet("info")
-ws_counts = gc.open_by_key(SHEET_ID).worksheet("cell_counts")
+# ——— Google Sheets public CSV settings ———
+GSHEETS_API_KEY = st.secrets["GSHEETS_API_KEY"]
+SHEET_ID        = st.secrets["SHEET_ID"]
+GID_INFO        = st.secrets["GID_INFO"]
+GID_COUNTS      = st.secrets["GID_COUNTS"]
 
 st.set_page_config(page_title="DAC_manager_v11", layout="wide")
 
@@ -185,7 +178,8 @@ with nav_bar:
 
 def load_batches():
     """Load all user batches from the 'info' sheet in Google Sheets."""
-    all_records = ws_info.get_all_records()
+    info_url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_INFO}&key={GSHEETS_API_KEY}"
+    all_records = pd.read_csv(info_url).to_dict(orient="records")
     df = pd.DataFrame(all_records)
     # filter to this user only
     df = df[df["username"] == username].copy()
@@ -468,53 +462,14 @@ if st.session_state['view'] == 'Batch Manager':
         edited_cell_df = st.data_editor(cell_df, use_container_width=True)
 
         if st.button("Save New Batch"):
-            # 1. info sheet: update or append the row
-            info_row = {
-                "username": username,
-                "batch_id": str(new_bid),
-                "cell": new_cell,
-                "start_date": new_sdate.strftime("%Y.%m.%d"),
-                "end_date": new_edate.strftime("%Y.%m.%d") if new_edate else "",
-                "note": new_note,
-                "day15": new_day15,
-                "day21": new_day21,
-                "banking": new_banking
-            }
-            # if this batch_id exists already, find its row index and update; else append
-            try:
-                cell_found = ws_info.find(str(info_row["batch_id"]), in_column=2)
-            except gspread.exceptions.CellNotFound:
-                cell_found = None
-            if cell_found:
-                ws_info.update(f"A{cell_found.row}:I{cell_found.row}", [list(info_row.values())])
-            else:
-                ws_info.append_row(list(info_row.values()))
-
-            # 2. cell_counts sheet: similar append/update per day and per column
-            for day, row_series in edited_cell_df.iterrows():
-                vals = [username, str(new_bid), day] + [row_series.get(c, "") for c in edited_cell_df.columns]
-                # Try to find a unique match for this username, batch_id, and day
-                try:
-                    # Compose a unique key string for matching
-                    match = None
-                    records = ws_counts.get_all_records()
-                    for i, rec in enumerate(records, start=2):  # header is row 1
-                        if rec.get("username") == username and str(rec.get("batch_id")) == str(new_bid) and rec.get("day") == day:
-                            match = i
-                            break
-                    if match:
-                        ws_counts.update(f"A{match}:R{match}", [vals])
-                    else:
-                        ws_counts.append_row(vals)
-                except Exception:
-                    ws_counts.append_row(vals)
-            st.success(f"Batch {new_bid} added.")
+            st.warning("Saving new batches is disabled: Google Sheets public API is read-only.")
 
     elif st.session_state['mode'] == 'edit':
         bid = st.session_state['edit_id']
         st.subheader(f"Batch Information #{bid}")
         # Load batch info from Google Sheet
-        all_info = ws_info.get_all_records()
+        info_url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_INFO}&key={GSHEETS_API_KEY}"
+        all_info = pd.read_csv(info_url).to_dict(orient="records")
         info_df = pd.DataFrame(all_info)
         rec = info_df[(info_df["username"] == username) & (info_df["batch_id"].astype(str) == str(bid))]
         if not rec.empty:
@@ -554,7 +509,8 @@ if st.session_state['view'] == 'Batch Manager':
             cols = ["A", "B", "C"] + [str(i) for i in range(1, 16)]
             cell_index = ["Day 15", "Day 21", "Banking"]
             # Load cell counts from Google Sheet
-            all_counts = ws_counts.get_all_records()
+            counts_url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_COUNTS}&key={GSHEETS_API_KEY}"
+            all_counts = pd.read_csv(counts_url).to_dict(orient="records")
             counts_df = pd.DataFrame(all_counts)
             batch_counts = counts_df[
                 (counts_df["username"] == username) & (counts_df["batch_id"].astype(str) == str(bid))
@@ -568,41 +524,7 @@ if st.session_state['view'] == 'Batch Manager':
             edited_cell_df = st.data_editor(cell_df, use_container_width=True)
 
             if st.button("Update Batch Information"):
-                info_row = {
-                    "username": username,
-                    "batch_id": str(bid),
-                    "cell": edit_cell,
-                    "start_date": edit_sdate.strftime("%Y.%m.%d"),
-                    "end_date": edit_edate.strftime("%Y.%m.%d") if edit_edate else "",
-                    "note": edit_note,
-                    "day15": edit_day15,
-                    "day21": edit_day21,
-                    "banking": edit_banking
-                }
-                try:
-                    cell_found = ws_info.find(str(info_row["batch_id"]), in_column=2)
-                except gspread.exceptions.CellNotFound:
-                    cell_found = None
-                if cell_found:
-                    ws_info.update(f"A{cell_found.row}:I{cell_found.row}", [list(info_row.values())])
-                else:
-                    ws_info.append_row(list(info_row.values()))
-                for day, row_series in edited_cell_df.iterrows():
-                    vals = [username, str(bid), day] + [row_series.get(c, "") for c in edited_cell_df.columns]
-                    # Try to find a unique match for this username, batch_id, and day
-                    try:
-                        match = None
-                        for i, rec in enumerate(all_counts, start=2):
-                            if rec.get("username") == username and str(rec.get("batch_id")) == str(bid) and rec.get("day") == day:
-                                match = i
-                                break
-                        if match:
-                            ws_counts.update(f"A{match}:R{match}", [vals])
-                        else:
-                            ws_counts.append_row(vals)
-                    except Exception:
-                        ws_counts.append_row(vals)
-                st.success(f"Batch {bid} updated.")
+                st.warning("Updating batches is disabled: Google Sheets public API is read-only.")
         else:
             st.error(f"Batch {bid} not found.")
 
