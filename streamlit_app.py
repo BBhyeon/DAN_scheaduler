@@ -40,43 +40,21 @@ if "logged_in" not in st.session_state:
 if "show_create" not in st.session_state:
     st.session_state["show_create"] = False
 
-# ---------------------- CREDENTIALS FILE ----------------------
-CRED_FILE = "credentials.json"
-if os.path.exists(CRED_FILE):
-    with open(CRED_FILE, "r") as f:
-        credentials = json.load(f)
-else:
-    credentials = {}
-    with open(CRED_FILE, "w") as f:
-        json.dump(credentials, f)
+# ---------------------- CREDENTIALS from Secrets ----------------------
+# Use the STATIC map of username/passwords from Streamlit Secrets
+credentials = st.secrets["CREDENTIALS"]
 
 # ---------------------- TOP-BAR LOGIN & ACCOUNT CREATION ----------------------
-# Credentials file path
-CRED_FILE = "credentials.json"
-
 # Restore login from URL params if present
 params = st.query_params
 if "user" in params and params["user"]:
     param_user = params["user"][0]
-    try:
-        with open(CRED_FILE, "r") as f:
-            all_creds = json.load(f)
-    except:
-        all_creds = {}
+    all_creds = credentials
     if param_user in all_creds:
         st.session_state["logged_in"] = True
         st.session_state["username"] = param_user
         USER_BATCH_DIR = os.path.join("batches", param_user)
         os.makedirs(USER_BATCH_DIR, exist_ok=True)
-
-# Load or initialize credentials
-if os.path.exists(CRED_FILE):
-    with open(CRED_FILE, "r") as f:
-        credentials = json.load(f)
-else:
-    credentials = {}
-    with open(CRED_FILE, "w") as f:
-        json.dump(credentials, f)
 
 top_bar = st.container()
 with top_bar:
@@ -141,11 +119,8 @@ if not st.session_state.get("logged_in", False) and st.session_state.get("show_c
         elif new_user in credentials:
             st.error("Username already exists.")
         else:
-            credentials[new_user] = new_pass
-            with open(CRED_FILE, "w") as f:
-                json.dump(credentials, f)
-            os.makedirs(os.path.join("batches", new_user), exist_ok=True)
-            st.success(f"Account '{new_user}' created! Please log in.")
+            st.error("Account creation is disabled (static credentials from secrets).")
+            # If you want to allow account creation, you must update Streamlit secrets and redeploy.
             st.session_state["show_create"] = False
     st.stop()
 
