@@ -1,9 +1,4 @@
 import streamlit as st
- # Persist login via URL query parameter
- params = st.experimental_get_query_params()
- if "user" in params and params["user"]:
-     st.session_state["username"] = params["user"][0]
-     st.session_state["logged_in"] = True
 import pandas as pd
 from pandas import ExcelWriter
 from datetime import datetime, timedelta
@@ -64,6 +59,16 @@ if "show_create" not in st.session_state:
 # (Removed static credentials; now using Google Sheet for accounts)
 
 ## ---------------------- TOP-BAR LOGIN & ACCOUNT CREATION ----------------------
+# Restore login from URL params if present
+params = st.query_params
+if "user" in params and params["user"]:
+    param_user = params["user"][0]
+    accounts_df = load_accounts()
+    if param_user in accounts_df["username"].astype(str).tolist():
+        st.session_state["logged_in"] = True
+        st.session_state["username"] = param_user
+        USER_BATCH_DIR = os.path.join("batches", param_user)
+        os.makedirs(USER_BATCH_DIR, exist_ok=True)
 
 top_bar = st.container()
 with top_bar:
@@ -101,7 +106,10 @@ with top_bar:
                             st.session_state["logged_in"] = True
                             st.session_state["username"]  = username
                             os.makedirs(os.path.join("batches", username), exist_ok=True)
-                            st.experimental_set_query_params(user=username)
+                            try:
+                                st.experimental_set_query_params(user=username)
+                            except:
+                                pass
         else:
             cols[3].markdown("")
 
@@ -112,10 +120,13 @@ with top_bar:
                 st.session_state["show_create"] = True
         else:
             if st.button("Logout"):
-                # Clear login state and URL param
                 for key in ["logged_in", "username", "view", "show_create"]:
-                    st.session_state.pop(key, None)
-                st.experimental_set_query_params()  # remove all query params
+                    if key in st.session_state:
+                        del st.session_state[key]
+                try:
+                    st.experimental_set_query_params()
+                except Exception:
+                    pass
 
 # If not logged in and show_create is True, display create-account form in main area
 if not st.session_state.get("logged_in", False) and st.session_state.get("show_create", False):
@@ -497,8 +508,8 @@ if st.session_state['view'] == 'Batch Manager':
                 row = [username, int(new_bid), day] + edited_cell_df.loc[day].fillna("").tolist()
                 ws_counts.append_row(row)
 
-                st.success(f"Batch {new_bid} created and saved to Google Sheets.")
-                # page refresh removed
+            st.success(f"Batch {new_bid} created and saved to Google Sheets.")
+            # page refresh removed
 
     elif st.session_state['mode'] == 'edit':
         bid = st.session_state['edit_id']
