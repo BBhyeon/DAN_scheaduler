@@ -32,8 +32,9 @@ sh    = gc.open_by_key(SHEET_ID)
 ws_info   = sh.worksheet("info")
 ws_counts = sh.worksheet("cell_counts")
 
-# Load accounts from Google Sheet
-ws_accounts = sh.worksheet("account")
+# Select the account worksheet by its gid from secrets
+GID_ACCOUNTS = int(st.secrets["GID_ACCOUNTS"])
+ws_accounts = next(ws for ws in sh.worksheets() if ws.id == GID_ACCOUNTS)
 
 @st.cache_data(ttl=300)
 def load_accounts():
