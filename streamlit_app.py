@@ -591,9 +591,11 @@ if st.session_state['view'] == 'Batch Manager':
                 for day in edited_cell_df.index:
                     row = [username, bid, day] + edited_cell_df.loc[day].fillna("").tolist()
                     ws_counts.append_row(row)
-
-                st.success(f"Batch {bid} updated in Google Sheets.")
-                # page refresh removed
+                st.session_state["update_ack"] = bid
+        # Show update confirmation if just updated
+        if st.session_state.get("update_ack") == bid:
+            st.success(f"Batch {bid} updated in Google Sheets.")
+            del st.session_state["update_ack"]
         else:
             st.error(f"Batch {bid} not found.")
 
