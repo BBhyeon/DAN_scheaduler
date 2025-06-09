@@ -1,9 +1,11 @@
 import streamlit as st
- # Persist login via URL query parameter
- params = st.experimental_get_query_params()
- if "user" in params and params["user"]:
-     st.session_state["username"] = params["user"][0]
-     st.session_state["logged_in"] = True
+
+# Persist login via URL query parameter
+params = st.experimental_get_query_params()
+if "user" in params and params["user"]:
+    st.session_state["username"] = params["user"][0]
+    st.session_state["logged_in"] = Tru
+
 import pandas as pd
 from pandas import ExcelWriter
 from datetime import datetime, timedelta
