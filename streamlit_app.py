@@ -208,7 +208,10 @@ if st.session_state["view"]=="Calendar":
         st.info("No ongoing batches.")
     else:
         cal = make_calendar(dfb,today)
-        st.dataframe(cal.style.apply(style_cal,today=today), use_container_width=True)
+        st.dataframe(
+            cal.style.apply(style_cal, axis=None, today=today),
+            use_container_width=True
+        )
 
 # ---------------------- Tasks View ----------------------
 if st.session_state["view"]=="Tasks":
