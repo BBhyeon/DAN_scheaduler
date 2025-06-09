@@ -512,7 +512,7 @@ if st.session_state['view'] == 'Batch Manager':
                 ws_counts.append_row(row)
 
             st.success(f"Batch {new_bid} created and saved to Google Sheets.")
-            st.experimental_rerun()
+            # page refresh removed
 
     elif st.session_state['mode'] == 'edit':
         bid = st.session_state['edit_id']
@@ -600,7 +600,7 @@ if st.session_state['view'] == 'Batch Manager':
                     ws_counts.append_row(row)
 
                 st.success(f"Batch {bid} updated in Google Sheets.")
-                st.experimental_rerun()
+                # page refresh removed
         else:
             st.error(f"Batch {bid} not found.")
 
