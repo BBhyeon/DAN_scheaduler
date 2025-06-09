@@ -13,8 +13,16 @@ from oauth2client.service_account import ServiceAccountCredentials
 
 
 # ——— Google Sheets settings ———
-SHEET_ID   = st.secrets["SHEET_ID"]
-GSPREAD_CRED = st.secrets["GSPREAD_CRED"]
+SHEET_ID = st.secrets.get("SHEET_ID")
+if not SHEET_ID:
+    st.error("Missing SHEET_ID in Streamlit secrets. Please add your Google Sheet ID.")
+    st.stop()
+
+try:
+    GSPREAD_CRED = st.secrets["GSPREAD_CRED"]
+except KeyError:
+    st.error("Missing GSPREAD_CRED in Streamlit secrets. Please add your service account JSON under that key.")
+    st.stop()
 
 # Authenticate to Google Sheets
 scope = ["https://spreadsheets.google.com/feeds","https://www.googleapis.com/auth/drive"]
