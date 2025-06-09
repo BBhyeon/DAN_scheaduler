@@ -592,12 +592,14 @@ if st.session_state['view'] == 'Batch Manager':
                     row = [username, bid, day] + edited_cell_df.loc[day].fillna("").tolist()
                     ws_counts.append_row(row)
                 st.session_state["update_ack"] = bid
-        # Show update confirmation if just updated
-        if st.session_state.get("update_ack") == bid:
-            st.success(f"Batch {bid} updated in Google Sheets.")
-            del st.session_state["update_ack"]
-        else:
+        # If no record loaded, show error
+        if rec.empty:
             st.error(f"Batch {bid} not found.")
+        else:
+            # Show update confirmation if just updated
+            if st.session_state.get("update_ack") == bid:
+                st.success(f"Batch {bid} updated in Google Sheets.")
+                del st.session_state["update_ack"]
 
 # ---------------------- Image Viewer ----------------------
 if st.session_state['view'] == 'Image Viewer':
