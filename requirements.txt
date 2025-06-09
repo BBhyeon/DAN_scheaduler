@@ -4,3 +4,5 @@ openpyxl
 Pillow
 streamlit-sortables
 PyGithub
+gspread
+oauth2client
