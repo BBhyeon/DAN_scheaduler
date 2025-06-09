@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-import requests
 from pandas import ExcelWriter
 from datetime import datetime, timedelta
 import os
@@ -9,297 +8,687 @@ import re
 from PIL import Image
 from streamlit_sortables import sort_items
 
+import gspread
+from google.oauth2.service_account import Credentials
+
+# Google Sheets settings: stored as Streamlit secrets
+SHEET_ID = st.secrets["SHEET_ID"]
+CREDS_INFO = st.secrets["GSPREAD_CRED"]
+scope = ["https://www.googleapis.com/auth/spreadsheets"]
+creds = Credentials.from_service_account_info(CREDS_INFO, scopes=scope)
+gc = gspread.authorize(creds)
+
+# Worksheets
+ws_info = gc.open_by_key(SHEET_ID).worksheet("info")
+ws_counts = gc.open_by_key(SHEET_ID).worksheet("cell_counts")
+
 st.set_page_config(page_title="DAC_manager_v11", layout="wide")
 
-# ——— Google Sheets via REST + CSV exports ———
-# Your sheet (publicly shared) ID and GIDs (from .streamlit/secrets.toml)
-SHEET_ID   = st.secrets["SHEET_ID"]
-GID_INFO   = st.secrets["GID_INFO"]
-GID_COUNTS = st.secrets["GID_COUNTS"]
-
-CSV_INFO   = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_INFO}"
-CSV_COUNTS = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_COUNTS}"
-
-# API key stored securely in Streamlit Secrets
-API_KEY    = st.secrets["GSHEETS_API_KEY"]
-
-# ——— Data Loading/Writing Helpers —————————————————————————————
-@st.cache_data(ttl=300)
-def load_info_df():
-    return pd.read_csv(CSV_INFO)
-
-@st.cache_data(ttl=300)
-def load_counts_df():
-    return pd.read_csv(CSV_COUNTS)
-
-def overwrite_info(df: pd.DataFrame):
-    url = f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}/values/info!A1:Z"
-    params = {"valueInputOption":"USER_ENTERED", "key": API_KEY}
-    body = {
-        "range":"info!A1",
-        "majorDimension":"ROWS",
-        "values":[df.columns.tolist()] + df.values.tolist()
-    }
-    r = requests.put(url, params=params, json=body)
-    r.raise_for_status()
-
-def append_counts(rows: list[list]):
-    url = f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}/values/cell_counts!A1:Z:append"
-    params = {"valueInputOption":"USER_ENTERED", "key": API_KEY}
-    r = requests.post(url, params=params, json={"values": rows})
-    r.raise_for_status()
-
-# ——— Application Logic Helpers —————————————————————————————
-@st.cache_data(ttl=300)
-def load_batches(username):
-    df = load_info_df()
-    df = df[df["username"] == username]
-    df["start_date"] = pd.to_datetime(df["start_date"], errors="coerce").dt.date
-    df["end_date"]   = pd.to_datetime(df["end_date"], errors="coerce").dt.date
-    return df
-
-def save_batch(username, batch_id, info_row: dict, counts_df: pd.DataFrame):
-    # overwrite info sheet
-    all_info = load_info_df()
-    keep = all_info[~((all_info.username==username)&(all_info.batch_id==batch_id))]
-    new_info = pd.concat([keep, pd.DataFrame([info_row])], ignore_index=True)
-    overwrite_info(new_info)
-    # append counts
-    flat = (
-        counts_df.reset_index()
-          .melt(id_vars="index", var_name="phase", value_name="value")
-          .assign(username=username, batch_id=batch_id)
-          [["phase","variable","value","username","batch_id"]]
-          .values.tolist()
-    )
-    append_counts(flat)
-
-# ——— Authentication —————————————————————————————————————
-CRED_FILE = "credentials.json"
-if not os.path.exists(CRED_FILE):
-    with open(CRED_FILE, "w") as f:
-        json.dump({}, f)
-with open(CRED_FILE, "r") as f:
-    credentials = json.load(f)
-
+# Initialize session state flags if not present
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
 if "show_create" not in st.session_state:
     st.session_state["show_create"] = False
 
-# Restore login via URL param
+# ---------------------- CREDENTIALS FILE ----------------------
+CRED_FILE = "credentials.json"
+if os.path.exists(CRED_FILE):
+    with open(CRED_FILE, "r") as f:
+        credentials = json.load(f)
+else:
+    credentials = {}
+    with open(CRED_FILE, "w") as f:
+        json.dump(credentials, f)
+
+# ---------------------- TOP-BAR LOGIN & ACCOUNT CREATION ----------------------
+# Credentials file path
+CRED_FILE = "credentials.json"
+
+# Restore login from URL params if present
 params = st.query_params
 if "user" in params and params["user"]:
-    user_param = params["user"][0]
-    if user_param in credentials:
+    param_user = params["user"][0]
+    try:
+        with open(CRED_FILE, "r") as f:
+            all_creds = json.load(f)
+    except:
+        all_creds = {}
+    if param_user in all_creds:
         st.session_state["logged_in"] = True
-        st.session_state["username"]  = user_param
+        st.session_state["username"] = param_user
+        USER_BATCH_DIR = os.path.join("batches", param_user)
+        os.makedirs(USER_BATCH_DIR, exist_ok=True)
 
-# Top bar: login / new-account / logout
-top = st.container()
-with top:
-    cols = st.columns([2,2,2,2,1])
-    if not st.session_state["logged_in"]:
+# Load or initialize credentials
+if os.path.exists(CRED_FILE):
+    with open(CRED_FILE, "r") as f:
+        credentials = json.load(f)
+else:
+    credentials = {}
+    with open(CRED_FILE, "w") as f:
+        json.dump(credentials, f)
+
+top_bar = st.container()
+with top_bar:
+    cols = st.columns([2, 2, 2, 2, 1])
+    # First column: Welcome message or app title
+    if not st.session_state.get("logged_in", False):
         cols[0].markdown("### DAC Manager")
-        with cols[1]:
-            username = st.text_input("", placeholder="Username", label_visibility="collapsed")
-        with cols[2]:
-            password = st.text_input("", type="password", placeholder="Password", label_visibility="collapsed")
-        with cols[3]:
-            if st.button("Login"):
-                if not username or not password:
-                    st.warning("Enter both username and password.")
-                elif username not in credentials or credentials[username]!=password:
-                    st.error("Invalid credentials.")
-                else:
-                    st.session_state["logged_in"] = True
-                    st.session_state["username"]  = username
-                    try:
-                        st.experimental_set_query_params(user=username)
-                    except:
-                        pass
-        with cols[4]:
-            if st.button("New Account"):
-                st.session_state["show_create"] = True
     else:
         cols[0].markdown(f"### Welcome, {st.session_state['username']}!")
-        cols[3].button("Logout", on_click=lambda: st.session_state.clear(), key="logout")
 
-# New account flow
-if not st.session_state["logged_in"] and st.session_state["show_create"]:
-    st.subheader("Create New Account")
-    new_u = st.text_input("New Username", key="u2")
-    new_p = st.text_input("New Password", type="password", key="p2")
-    if st.button("Save Account"):
-        if not new_u or not new_p:
-            st.error("Enter both fields.")
-        elif new_u in credentials:
-            st.error("Username exists.")
+    # Second and third columns: Hide entirely when logged in
+    with cols[1]:
+        if not st.session_state.get("logged_in", False):
+            username = st.text_input("", key="top_login_user", placeholder="Username", label_visibility="collapsed")
+    with cols[2]:
+        if not st.session_state.get("logged_in", False):
+            password = st.text_input("", type="password", key="top_login_pass", placeholder="Password", label_visibility="collapsed")
+
+    # Fourth column: Login button only (no logout here)
+    with cols[3]:
+        if not st.session_state.get("logged_in", False):
+            if st.button("Login"):
+                if not username or not password:
+                    st.warning("Please enter both username and password.")
+                elif username not in credentials or credentials[username] != password:
+                    st.error("Invalid username or password.")
+                else:
+                    st.session_state["logged_in"] = True
+                    st.session_state["username"] = username
+                    USER_BATCH_DIR = os.path.join("batches", username)
+                    os.makedirs(USER_BATCH_DIR, exist_ok=True)
+                    try:
+                        st.experimental_set_query_params(user=username)
+                    except Exception:
+                        pass
         else:
-            credentials[new_u] = new_p
-            with open(CRED_FILE,"w") as f:
-                json.dump(credentials,f)
-            st.success(f"Account '{new_u}' created. Please login.")
+            cols[3].markdown("")
+
+    # Fifth column: Create Account button only when not logged in
+    with cols[4]:
+        if not st.session_state.get("logged_in", False):
+            if st.button("New Account"):
+                st.session_state["show_create"] = True
+        else:
+            if st.button("Logout"):
+                for key in ["logged_in", "username", "view", "show_create"]:
+                    if key in st.session_state:
+                        del st.session_state[key]
+                try:
+                    st.experimental_set_query_params()
+                except Exception:
+                    pass
+
+# If not logged in and show_create is True, display create-account form in main area
+if not st.session_state.get("logged_in", False) and st.session_state.get("show_create", False):
+    st.subheader("Create New Account")
+    new_user = st.text_input("New Username", key="main_new_user")
+    new_pass = st.text_input("New Password", type="password", key="main_new_pass")
+    if st.button("Save Account", key="main_save_account"):
+        if not new_user or not new_pass:
+            st.error("Please enter both username and password.")
+        elif new_user in credentials:
+            st.error("Username already exists.")
+        else:
+            credentials[new_user] = new_pass
+            with open(CRED_FILE, "w") as f:
+                json.dump(credentials, f)
+            os.makedirs(os.path.join("batches", new_user), exist_ok=True)
+            st.success(f"Account '{new_user}' created! Please log in.")
             st.session_state["show_create"] = False
     st.stop()
 
-# require login for rest of app
-if not st.session_state["logged_in"]:
+# If not logged in, stop rendering the rest
+if not st.session_state.get("logged_in", False):
     st.stop()
 
+# Set up user-specific batch directory
 username = st.session_state["username"]
-today = datetime.today().date()
+USER_BATCH_DIR = os.path.join("batches", username)
+BATCH_DIR = USER_BATCH_DIR
+os.makedirs(BATCH_DIR, exist_ok=True)
+PROTOCOL_FILE = "DAP_protocol_extended.xlsx"
 
-# Navigation bar
-nav = st.container()
-with nav:
-    t1,t2,t3,t4 = st.columns([1,1,1,1])
-    if t1.button("Calendar"):      st.session_state["view"]="Calendar"
-    if t2.button("Tasks"):         st.session_state["view"]="Tasks"
-    if t3.button("Batch Manager"): st.session_state["view"]="Batch Manager"
-    if t4.button("Image Viewer"):  st.session_state["view"]="Image Viewer"
+# ---------------------- TOP-BAR NAVIGATION ----------------------
+nav_bar = st.container()
+with nav_bar:
+    tab1, tab2, tab3, tab4 = st.columns([1, 1, 1, 1])
+    with tab1:
+        if st.button("Calendar"):
+            st.session_state["view"] = "Calendar"
+    with tab2:
+        if st.button("Tasks"):
+            st.session_state["view"] = "Tasks"
+    with tab3:
+        if st.button("Batch Manager"):
+            st.session_state["view"] = "Batch Manager"
+    with tab4:
+        if st.button("Image Viewer"):
+            st.session_state["view"] = "Image Viewer"
 
-if "view" not in st.session_state:
-    st.session_state["view"] = "Calendar"
+# ---------------------- CONFIG ----------------------
 
-# ——— Calendar View ———————————————————————————————————
-def make_calendar(df, today, length=22):
+
+# ---------------------- HELPERS ----------------------
+# def batch_file(bid):
+#     return os.path.join(BATCH_DIR, f"batch_{bid}.csv")
+
+# def save_batch(row):
+#     """
+#     Save a single batch’s row (dict with keys: batch_id, start_date, end_date, etc.) to its CSV.
+#     """
+#     r = dict(row)
+#     r['start_date'] = str(r.get('start_date', ''))
+#     r['end_date'] = str(r.get('end_date', ''))
+#     pd.DataFrame([r]).to_csv(batch_file(r['batch_id']), index=False)
+
+def load_batches():
+    """Load all user batches from the 'info' sheet in Google Sheets."""
+    all_records = ws_info.get_all_records()
+    df = pd.DataFrame(all_records)
+    # filter to this user only
+    df = df[df["username"] == username].copy()
+    if df.empty:
+        return pd.DataFrame(columns=["batch_id","start_date","end_date","cell","note","day15","day21","banking"])
+    # parse dates
+    df["start_date"] = pd.to_datetime(df["start_date"], errors="coerce").dt.date
+    df["end_date"]   = pd.to_datetime(df["end_date"], errors="coerce").dt.date
+    return df[["batch_id","start_date","end_date","cell","note","day15","day21","banking"]]
+
+def make_calendar(df: pd.DataFrame, today: datetime.date, length: int = 22) -> pd.DataFrame:
+    """
+    Build a “heatmap” calendar DataFrame for each batch (rows) over the next `length` days starting today.
+    Columns are a MultiIndex [(year, month_abbr, 'weekday dd'), …].
+    Each cell’s value = day-index since start_date (0,1,2,…), or NaN if out of window.
+    """
     dates = [today + timedelta(days=i) for i in range(length)]
     cols = pd.MultiIndex.from_tuples(
-        [(d.year, d.strftime("%b"), d.strftime("%a %d")) for d in dates],
-        names=["Year","Month","Day"]
+        [(str(d.year), d.strftime('%b'), d.strftime('%a %d')) for d in dates],
+        names=['Year','Month','Day']
     )
-    cal = pd.DataFrame(index=df.batch_id.astype(str), columns=cols, dtype=object).fillna("")
-    for _, r in df.iterrows():
-        sd = r.start_date
-        ed = r.end_date if pd.notna(r.end_date) else (sd + timedelta(days=length) if pd.notna(sd) else None)
-        if pd.isna(sd) or ed is None:
+    df_sorted = df.sort_values('batch_id').reset_index(drop=True)
+    cal = pd.DataFrame(index=df_sorted.batch_id.astype(str), columns=cols)
+
+    for _, row in df_sorted.iterrows():
+        try:
+            start = pd.to_datetime(row.start_date).date()
+            end   = pd.to_datetime(row.end_date).date()
+        except:
             continue
-        idx = sd; di = 0
-        while idx <= ed:
-            if idx in dates:
-                key = (idx.year, idx.strftime("%b"), idx.strftime("%a %d"))
-                cal.at[str(r.batch_id), key] = di
-            idx += timedelta(days=1); di += 1
+        if pd.isna(row.end_date):
+            end = start + timedelta(days=length)
+        current = start
+        day_index = 0
+        while current <= end:
+            if current in dates:
+                key = (str(current.year), current.strftime('%b'), current.strftime('%a %d'))
+                cal.loc[str(row.batch_id), key] = day_index
+            current += timedelta(days=1)
+            day_index += 1
+
     return cal
 
-def style_cal(df, today):
-    yellow={1,2,4,6,8,9,10,12,14,16,18,20}
-    blue={15,21}
+def style_calendar(df: pd.DataFrame, today: datetime.date, **kwargs):
+    """
+    Style rules:
+      • Red border on the first column (today’s date).
+      • Yellow shading on media/change days: {1,2,4,6,8,9,10,12,14,16,18,20}.
+      • Blue shading on days 15 and 21.
+    """
+    yellow_days = {1,2,4,6,8,9,10,12,14,16,18,20}
+    blue_days   = {15,21}
     styles = pd.DataFrame("", index=df.index, columns=df.columns)
-    if df.columns.size == 0:
-        return styles
-    first = df.columns[0]
-    for r in df.index:
-        for c in df.columns:
-            v = df.at[r, c]
-            try:
-                val = float(v)
-            except (ValueError, TypeError):
+    first_key = df.columns[0]
+
+    for row in df.index:
+        for col in df.columns:
+            val = df.loc[row, col]
+            if pd.isna(val) or val == "":
                 continue
-            d = int(val)
-            if d in yellow:
-                styles.at[r, c] = "background-color:#fff3b0"
-            if d in blue:
-                styles.at[r, c] = "background-color:#add8e6"
-        styles.at[r, first] += "; border:3px solid red"
+            try:
+                day_idx = int(float(val))
+            except:
+                day_idx = None
+            if day_idx in yellow_days:
+                styles.loc[row, col] = "background-color: #fff3b0"
+            elif day_idx in blue_days:
+                styles.loc[row, col] = "background-color: #add8e6"
+    if first_key in df.columns:
+        for row in df.index:
+            existing_style = styles.at[row, first_key]
+            if existing_style:
+                styles.at[row, first_key] = existing_style + "; border: 3px solid red;"
+            else:
+                styles.at[row, first_key] = "border: 3px solid red;"
     return styles
 
-if st.session_state["view"]=="Calendar":
-    dfb = load_batches(username)
+# Set initial view if not present
+if 'view' not in st.session_state:
+    st.session_state['view'] = 'Calendar'
+
+# Load batches and filter to those still within Day ≤ 21
+batches = load_batches()
+today = datetime.today().date()
+if not batches.empty:
+    full_cal = make_calendar(batches, today)
+    valid_ids = []
+    today_key = (str(today.year), today.strftime('%b'), today.strftime('%a %d'))
+    for bid in full_cal.index:
+        val = full_cal.loc[bid, today_key]
+        if pd.notna(val) and int(val) <= 21:
+            valid_ids.append(str(bid))
+    batches = batches[batches['batch_id'].astype(str).isin(valid_ids)].reset_index(drop=True)
+
+# ---------------------- Differentiation Calendar ----------------------
+if st.session_state['view'] == 'Calendar':
     st.subheader("📆 Differentiation Calendar")
-    if dfb.empty:
-        st.info("No ongoing batches.")
+    if batches.empty:
+        st.info("No ongoing batches to display.")
     else:
-        cal = make_calendar(dfb, today)
-        st.dataframe(
-            cal.style.apply(style_cal, axis=None, today=today),
-            use_container_width=True
-        )
+        cal = make_calendar(batches, today)
+        styled = cal.style.apply(style_calendar, today=today, axis=None)
+        st.dataframe(styled, use_container_width=True, hide_index=False)
+        # Display scheme image below calendar
+        st.image("scheme.png", use_container_width=True)
 
-# ——— Tasks View —————————————————————————————————————
-if st.session_state["view"]=="Tasks":
-    dfb = load_batches(username)
+# ---------------------- Today's Batch Tasks ----------------------
+if st.session_state['view'] == 'Tasks':
     st.subheader("📌 Batch Tasks")
-    sel_date = st.date_input("Select Date", value=today)
-    if dfb.empty:
+    selected_date = st.date_input("Select Date", value=today, key='task_date')
+    if batches.empty:
         st.info("No ongoing batches.")
     else:
-        st.write("Tasks implementation here")
+        try:
+            df_proto = pd.read_excel(PROTOCOL_FILE, engine="openpyxl")
+            df_proto["percentage"] = pd.to_numeric(df_proto["percentage"], errors="coerce")
+            mask_pct = df_proto["percentage"].isna()
 
-# ——— Batch Manager ———————————————————————————————————
-if st.session_state["view"]=="Batch Manager":
+            def parse_conc(val):
+                if isinstance(val, str):
+                    v = val.strip().lower().replace("μ","u")
+                    if "nm" in v:
+                        return float(v.replace("nm","")) * 1e-3
+                    if "um" in v:
+                        return float(v.replace("um",""))
+                    if "mm" in v:
+                        return float(v.replace("mm","")) * 1e3
+                    if "ng/ml" in v:
+                        return float(v.replace("ng/ml","")) * 1e-3
+                    if "ug/ml" in v:
+                        return float(v.replace("ug/ml",""))
+                    if "x" in v:
+                        return float(v.replace("x",""))
+                try:
+                    return float(val)
+                except:
+                    return None
+
+            for idx in df_proto[mask_pct].index:
+                row = df_proto.loc[idx]
+                w = parse_conc(row["working_conc"])
+                s = parse_conc(row["stock_conc"])
+                if (w is not None) and s:
+                    df_proto.at[idx, "percentage"] = (w / s) * 100
+
+            df_proto["day"] = df_proto["day"].astype(int)
+            mdap_protocol = {}
+            for day_val in sorted(df_proto["day"].dropna().unique()):
+                subset = df_proto[df_proto["day"] == day_val]
+                day_entries = []
+                for task_name in subset["task"].unique():
+                    task_subset = subset[subset["task"] == task_name]
+                    if "Media Change" in task_name or "Plate coating" in task_name:
+                        comp_list = []
+                        for _, r in task_subset.iterrows():
+                            comp_list.append({
+                                "component":    r["component"],
+                                "percentage":   r.get("percentage", ""),
+                                "stock_conc":   r.get("stock_conc", ""),
+                                "working_conc": r.get("working_conc", ""),
+                            })
+                        day_entries.append({"task": task_name, "composition": comp_list})
+                    else:
+                        day_entries.append({"task": task_name})
+                mdap_protocol[day_val] = day_entries
+        except FileNotFoundError:
+            st.warning(f"Protocol file '{PROTOCOL_FILE}' not found.")
+            mdap_protocol = {}
+
+        cal2 = make_calendar(batches, selected_date)
+        ongoing = []
+        selected_key = (str(selected_date.year), selected_date.strftime('%b'), selected_date.strftime('%a %d'))
+        for bid in cal2.index:
+            try:
+                day_idx = cal2.loc[bid, selected_key]
+            except KeyError:
+                day_idx = None
+            if pd.notna(day_idx):
+                ongoing.append((bid, int(day_idx)))
+
+        if ongoing and mdap_protocol:
+            task_cols = st.columns(len(ongoing))
+            for i, (bid, day) in enumerate(ongoing):
+                with task_cols[i]:
+                    st.markdown(f"### 🧪 Batch {bid} (D{day})")
+                    # Determine and display stage based on day index
+                    if 0 <= day <= 5:
+                        st.markdown("**Stage:** FP induction")
+                    elif 6 <= day <= 11:
+                        st.markdown("**Stage:** NP induction")
+                    elif 12 <= day <= 21:
+                        st.markdown("**Stage:** mDAN induction")
+                    else:
+                        st.markdown("**Stage:** Unknown")
+                    day_entries = mdap_protocol.get(day, [])
+                    if not day_entries:
+                        st.info("No task for this day.")
+                    for idx, entry in enumerate(day_entries):
+                        task_txt = entry.get("task", "No task")
+                        st.markdown(f"**Task {idx+1}:** {task_txt}")
+                        if entry.get("composition"):
+                            default_vol = 15.0 if day <= 14 else 40.0
+                            total_vol = st.number_input(
+                                f"Total Volume (mL) for Task {idx+1}", 
+                                min_value=1.0, value=default_vol, step=1.0, 
+                                key=f"vol_{bid}_{idx}"
+                            )
+                            comp_entries = entry.get("composition", [])
+                            display_rows = []
+                            for item in comp_entries:
+                                name = item["component"]
+                                pct  = item.get("percentage", None)
+                                stock= item.get("stock_conc", "")
+                                work = item.get("working_conc", "")
+                                vol_str = ""
+                                if pct not in ("", None) and not pd.isna(pct):
+                                    vol_ml = total_vol * float(pct) / 100
+                                    if vol_ml < 1:
+                                        ul = int(round(vol_ml * 1000))
+                                        vol_str = f"{ul} µL"
+                                    else:
+                                        vol_str = f"{round(vol_ml, 2)} mL"
+                                elif stock and work:
+                                    stock_val = parse_conc(stock)
+                                    work_val  = parse_conc(work)
+                                    if stock_val and work_val:
+                                        ul_calc = (work_val * total_vol * 1000) / stock_val
+                                        if ul_calc < 1000:
+                                            vol_str = f"{int(round(ul_calc))} µL"
+                                        else:
+                                            vol_str = f"{round(ul_calc/1000, 2)} mL"
+                                display_rows.append({"Component": name, "Volume": vol_str})
+                            st.table(pd.DataFrame(display_rows))
+        else:
+            st.info("No ongoing batches with tasks for today.")
+
+# ---------------------- Batch Manager ----------------------
+if st.session_state['view'] == 'Batch Manager':
     st.subheader("📋 Batch Manager")
-    dfb = load_batches(username)
-    mode = st.radio("Mode", ["Add","Edit"], horizontal=True)
 
-    if mode=="Add":
-        new_id = st.number_input("Batch ID", min_value=1, value=1)
-        c = st.text_input("Cell Type")
-        s = st.date_input("Start Date", value=today)
-        e = st.date_input("End Date", value=today+timedelta(days=21))
-        n = st.text_area("Note")
-        cols = ["A","B","C"] + [str(i) for i in range(1,16)]
-        idx  = ["Day 15","Day 21","Banking"]
-        dfc  = pd.DataFrame(index=idx, columns=cols)
-        edited = st.data_editor(dfc, use_container_width=True)
+    if 'mode' not in st.session_state or st.session_state['mode'] == 'none':
+        st.session_state['mode'] = 'add'
+    if 'edit_id' not in st.session_state:
+        st.session_state['edit_id'] = None
+
+    col_add, col_load, col_button = st.columns([1, 3, 1])
+    with col_add:
+        if st.button("Add new batch"):
+            st.session_state['mode'] = 'add'
+            st.session_state['edit_id'] = None
+    with col_load:
+        load_bid = st.number_input("Batch ID to Load", min_value=1, step=1, key='load_bid')
+    with col_button:
+        if st.button("Load"):
+            st.session_state['mode'] = 'edit'
+            st.session_state['edit_id'] = int(load_bid)
+
+    if st.session_state['mode'] == 'add':
+        st.subheader("Batch Information")
+        try:
+            max_id = int(batches['batch_id'].astype(int).max())
+            default_id = max_id + 1
+        except:
+            default_id = 1
+        new_bid   = st.number_input("Batch ID",      min_value=1, step=1, value=default_id, key='new_bid')
+        new_cell  = st.text_input("Cell Type",      key='new_cell')
+        new_sdate = st.date_input("Start Date", value=today, key='new_sdate')
+        default_edate = today + timedelta(days=21)
+        new_edate = st.date_input("End Date (opt)", value=default_edate, key='new_edate')
+        new_note   = st.text_area("Note",           key='new_note')
+        new_day15  = st.text_input("Day 15 Info",   key='new_day15')
+        new_day21  = st.text_input("Day 21 Info",   key='new_day21')
+        new_banking= st.text_input("Banking Info",  key='new_banking')
+
+        # --- Cell Count Table Editor ---
+        cols = ["A", "B", "C"] + [str(i) for i in range(1, 16)]
+        cell_index = ["Day 15", "Day 21", "Banking"]
+        # No local file: always create new empty DataFrame for new batch
+        cell_df = pd.DataFrame(index=cell_index, columns=cols)
+        edited_cell_df = st.data_editor(cell_df, use_container_width=True)
 
         if st.button("Save New Batch"):
-            info = {
-                "username":username,
-                "batch_id":new_id,
-                "cell":c,
-                "start_date":s.strftime("%Y.%m.%d"),
-                "end_date":e.strftime("%Y.%m.%d"),
-                "note":n
+            # 1. info sheet: update or append the row
+            info_row = {
+                "username": username,
+                "batch_id": str(new_bid),
+                "cell": new_cell,
+                "start_date": new_sdate.strftime("%Y.%m.%d"),
+                "end_date": new_edate.strftime("%Y.%m.%d") if new_edate else "",
+                "note": new_note,
+                "day15": new_day15,
+                "day21": new_day21,
+                "banking": new_banking
             }
-            save_batch(username, new_id, info, edited)
-            st.success(f"Batch {new_id} saved.")
+            # if this batch_id exists already, find its row index and update; else append
+            try:
+                cell_found = ws_info.find(str(info_row["batch_id"]), in_column=2)
+            except gspread.exceptions.CellNotFound:
+                cell_found = None
+            if cell_found:
+                ws_info.update(f"A{cell_found.row}:I{cell_found.row}", [list(info_row.values())])
+            else:
+                ws_info.append_row(list(info_row.values()))
 
-    else:
-        bid = st.number_input("Batch ID to Load", min_value=1, value=1)
-        rec = dfb[dfb.batch_id==bid]
-        if rec.empty:
-            st.error("Not found.")
-        else:
-            r = rec.iloc[0]
-            c = st.text_input("Cell Type", value=r.cell)
-            s = st.date_input("Start Date", value=r.start_date)
-            e = st.date_input("End Date", value=r.end_date or today+timedelta(days=21))
-            n = st.text_area("Note", value=r.note)
-            cols = ["A","B","C"] + [str(i) for i in range(1,16)]
-            dfc = pd.DataFrame(index=["Day 15","Day 21","Banking"], columns=cols)
-            # TODO: load existing cell_counts into dfc here via load_counts_df()
-            edited = st.data_editor(dfc, use_container_width=True)
+            # 2. cell_counts sheet: similar append/update per day and per column
+            for day, row_series in edited_cell_df.iterrows():
+                vals = [username, str(new_bid), day] + [row_series.get(c, "") for c in edited_cell_df.columns]
+                # Try to find a unique match for this username, batch_id, and day
+                try:
+                    # Compose a unique key string for matching
+                    match = None
+                    records = ws_counts.get_all_records()
+                    for i, rec in enumerate(records, start=2):  # header is row 1
+                        if rec.get("username") == username and str(rec.get("batch_id")) == str(new_bid) and rec.get("day") == day:
+                            match = i
+                            break
+                    if match:
+                        ws_counts.update(f"A{match}:R{match}", [vals])
+                    else:
+                        ws_counts.append_row(vals)
+                except Exception:
+                    ws_counts.append_row(vals)
+            st.success(f"Batch {new_bid} added.")
 
-            if st.button("Update Batch"):
-                info = {
-                    "username":username,
-                    "batch_id":bid,
-                    "cell":c,
-                    "start_date":s.strftime("%Y.%m.%d"),
-                    "end_date":e.strftime("%Y.%m.%d"),
-                    "note":n
+    elif st.session_state['mode'] == 'edit':
+        bid = st.session_state['edit_id']
+        st.subheader(f"Batch Information #{bid}")
+        # Load batch info from Google Sheet
+        all_info = ws_info.get_all_records()
+        info_df = pd.DataFrame(all_info)
+        rec = info_df[(info_df["username"] == username) & (info_df["batch_id"].astype(str) == str(bid))]
+        if not rec.empty:
+            rec = rec.iloc[0]
+            edit_cell = st.text_input("Cell Type", value=rec.get('cell',''), key='edit_cell')
+            sdt = pd.to_datetime(rec.get('start_date'), format="%Y.%m.%d", errors='coerce')
+            # Parse end_date if present; otherwise treat as NaT
+            if rec.get('end_date', ""):
+                edt_parsed = pd.to_datetime(rec.get('end_date'), format="%Y.%m.%d", errors='coerce')
+            else:
+                edt_parsed = pd.NaT
+            # Default to start_date + 21 days if parsed end is NaT
+            if pd.isna(edt_parsed) and not pd.isna(sdt):
+                default_edate = (sdt + timedelta(days=21)).date()
+            elif pd.isna(edt_parsed):
+                default_edate = today + timedelta(days=21)
+            else:
+                default_edate = edt_parsed.date()
+
+            edit_sdate = st.date_input(
+                "Start Date",
+                value=sdt.date() if not pd.isna(sdt) else today,
+                key='edit_sdate'
+            )
+            edit_edate = st.date_input(
+                "End Date",
+                value=default_edate,
+                key='edit_edate'
+            )
+            edit_note   = st.text_area("Note", value=rec.get('note',''), key='edit_note')
+            edit_day15  = st.text_input("Day 15 Info", value=rec.get('day15',''), key='edit_day15')
+            edit_day21  = st.text_input("Day 21 Info", value=rec.get('day21',''), key='edit_day21')
+            edit_banking= st.text_input("Banking Info", value=rec.get('banking',''), key='edit_banking')
+
+            # --- Cell Count Table Editor ---
+            st.subheader("Cell count information")
+            cols = ["A", "B", "C"] + [str(i) for i in range(1, 16)]
+            cell_index = ["Day 15", "Day 21", "Banking"]
+            # Load cell counts from Google Sheet
+            all_counts = ws_counts.get_all_records()
+            counts_df = pd.DataFrame(all_counts)
+            batch_counts = counts_df[
+                (counts_df["username"] == username) & (counts_df["batch_id"].astype(str) == str(bid))
+            ]
+            cell_df = pd.DataFrame(index=cell_index, columns=cols)
+            for _, row in batch_counts.iterrows():
+                day = row.get("day", "")
+                vals = [row.get(c, "") for c in cols]
+                if day in cell_index:
+                    cell_df.loc[day] = vals
+            edited_cell_df = st.data_editor(cell_df, use_container_width=True)
+
+            if st.button("Update Batch Information"):
+                info_row = {
+                    "username": username,
+                    "batch_id": str(bid),
+                    "cell": edit_cell,
+                    "start_date": edit_sdate.strftime("%Y.%m.%d"),
+                    "end_date": edit_edate.strftime("%Y.%m.%d") if edit_edate else "",
+                    "note": edit_note,
+                    "day15": edit_day15,
+                    "day21": edit_day21,
+                    "banking": edit_banking
                 }
-                save_batch(username, bid, info, edited)
+                try:
+                    cell_found = ws_info.find(str(info_row["batch_id"]), in_column=2)
+                except gspread.exceptions.CellNotFound:
+                    cell_found = None
+                if cell_found:
+                    ws_info.update(f"A{cell_found.row}:I{cell_found.row}", [list(info_row.values())])
+                else:
+                    ws_info.append_row(list(info_row.values()))
+                for day, row_series in edited_cell_df.iterrows():
+                    vals = [username, str(bid), day] + [row_series.get(c, "") for c in edited_cell_df.columns]
+                    # Try to find a unique match for this username, batch_id, and day
+                    try:
+                        match = None
+                        for i, rec in enumerate(all_counts, start=2):
+                            if rec.get("username") == username and str(rec.get("batch_id")) == str(bid) and rec.get("day") == day:
+                                match = i
+                                break
+                        if match:
+                            ws_counts.update(f"A{match}:R{match}", [vals])
+                        else:
+                            ws_counts.append_row(vals)
+                    except Exception:
+                        ws_counts.append_row(vals)
                 st.success(f"Batch {bid} updated.")
+        else:
+            st.error(f"Batch {bid} not found.")
 
-# ——— Image Viewer ————————————————————————————————————
-if st.session_state["view"]=="Image Viewer":
-    st.subheader("🖼️ Image Viewer")
-    uploaded = st.file_uploader("Upload images", type=["jpg","png"], accept_multiple_files=True)
-    if not uploaded:
-        st.info("Please upload.")
+# ---------------------- Image Viewer ----------------------
+if st.session_state['view'] == 'Image Viewer':
+    # The following code is adapted from BIOv1.py, excluding its own set_page_config(...) call
+
+    # Step 1: Upload image files
+    uploaded_files = st.file_uploader(
+        "Drag and drop image files here (JPEG/PNG), or click to browse",
+        type=["jpg", "jpeg", "png"],
+        accept_multiple_files=True
+    )
+
+    if uploaded_files:
+        image_files = uploaded_files
+        batch_pattern = re.compile(r"^DIF(\d+)_", re.IGNORECASE)
     else:
-        groups = {}
-        for f in uploaded:
-            m = re.search(r"DIF(\d+)_D(\d+)_", f.name)
-            bid = m.group(1) if m else "Unknown"
-            day = m.group(2) if m else "Unknown"
-            groups.setdefault((bid, day), []).append(f)
-        for (bid, day), files in groups.items():
-            st.markdown(f"**Batch {bid} - Day {day}**")
-            cols = st.columns(4)
-            for i, f in enumerate(files):
-                img = Image.open(f)
-                cols[i%4].image(img, use_container_width=True)
+        st.info("Please upload image files to proceed.")
+        st.stop()
+
+    # Step 2: Group images by Batch ID, then by “DAY” prefix
+    batch_pattern = re.compile(r"^DIF(\d+)_", re.IGNORECASE)
+    day_pattern   = re.compile(r"_D(\d+)_", re.IGNORECASE)
+    batch_groups  = {}
+
+    # Build batch_groups: {batch_id: [UploadedFile, ...], ...}
+    for uploaded_file in image_files:
+        fname = uploaded_file.name
+        m = batch_pattern.search(fname)
+        if m:
+            bid = m.group(1)
+        else:
+            bid = "Unknown"
+        batch_groups.setdefault(bid, []).append(uploaded_file)
+
+
+    # Step 3: For each batch, show batch info from Excel, then group by day and display images
+    sorted_groups = {}
+    for bid, files_in_batch in sorted(batch_groups.items(), key=lambda x: int(x[0]) if x[0].isdigit() else 999):
+        # Load and display batch info from Excel
+        counts_file = os.path.join(BATCH_DIR, f"batch_{bid}.xlsx")
+        if os.path.exists(counts_file):
+            df_info = pd.read_excel(counts_file, sheet_name="info", dtype=str)
+            if not df_info.empty:
+                info = df_info.iloc[0].to_dict()
+                st.subheader(f"Batch {bid} Information")
+                st.write(f"**Cell Type:** {info.get('cell', '')}")
+                st.write(f"**Start Date:** {info.get('start_date', '')}")
+                st.write(f"**End Date:** {info.get('end_date', '')}")
+                st.write(f"**Note:** {info.get('note', '')}")
+                st.write(f"**Day 15 Info:** {info.get('day15', '')}")
+                st.write(f"**Day 21 Info:** {info.get('day21', '')}")
+                st.write(f"**Banking Info:** {info.get('banking', '')}")
+                # Display cell_counts sheet
+                try:
+                    df_counts = pd.read_excel(counts_file, sheet_name="cell_counts", index_col=0)
+                    st.subheader("Cell Counts")
+                    st.dataframe(df_counts, use_container_width=True)
+                except:
+                    st.info("No cell counts data available.")
+        else:
+            st.subheader(f"Batch {bid} (Info not found)")
+        # Group this batch's files by day
+        day_groups = {}
+        for f in files_in_batch:
+            fname = f.name
+            m = day_pattern.search(fname)
+            if m:
+                day = m.group(1)
+            else:
+                day = "Unknown"
+            day_groups.setdefault(day, []).append(f)
+        # Display each day group
+        for day, files in sorted(day_groups.items(), key=lambda x: int(x[0]) if x[0].isdigit() else 999):
+            st.markdown(f"**Day {day}**")
+            # Show images in rows of four for this day
+            for i in range(0, len(files), 4):
+                chunk = files[i:i+4]
+                cols4 = st.columns(4)
+                for idx, fobj in enumerate(chunk):
+                    try:
+                        img_disp = Image.open(fobj)
+                        cols4[idx].image(img_disp, caption=fobj.name, use_container_width=True)
+                    except:
+                        cols4[idx].empty()
+                # Fill remaining columns if fewer than 4
+                for idx in range(len(chunk), 4):
+                    cols4[idx].empty()
