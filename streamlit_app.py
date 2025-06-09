@@ -550,10 +550,11 @@ if st.session_state['view'] == 'Batch Manager':
             ]
             cell_df = pd.DataFrame(index=cell_index, columns=cols)
             for _, row in batch_counts.iterrows():
-                day = row.get("day", "")
+                # third column holds the phase (e.g. "Day 15", "Day 21", "Banking")
+                phase = row.iloc[2]
                 vals = [row.get(c, "") for c in cols]
-                if day in cell_index:
-                    cell_df.loc[day] = vals
+                if phase in cell_index:
+                    cell_df.loc[phase] = vals
             edited_cell_df = st.data_editor(cell_df, use_container_width=True)
 
             if st.button("Update Batch Information"):
