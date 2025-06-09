@@ -184,11 +184,27 @@ def load_batches():
     # filter to this user only
     df = df[df["username"] == username].copy()
     if df.empty:
-        return pd.DataFrame(columns=["batch_id","start_date","end_date","cell","note","day15","day21","banking"])
+        return pd.DataFrame(columns=[
+            "batch_id",
+            "start_date",
+            "end_date",
+            "cell",
+            "note",
+            "initial_plate_count",
+            "replaced_plate_count"
+        ])
     # parse dates
     df["start_date"] = pd.to_datetime(df["start_date"], errors="coerce").dt.date
     df["end_date"]   = pd.to_datetime(df["end_date"], errors="coerce").dt.date
-    return df[["batch_id","start_date","end_date","cell","note","day15","day21","banking"]]
+    return df[[
+        "batch_id",
+        "start_date",
+        "end_date",
+        "cell",
+        "note",
+        "initial_plate_count",
+        "replaced_plate_count"
+    ]]
 
 def make_calendar(df: pd.DataFrame, today: datetime.date, length: int = 22) -> pd.DataFrame:
     """
@@ -450,9 +466,8 @@ if st.session_state['view'] == 'Batch Manager':
         default_edate = today + timedelta(days=21)
         new_edate = st.date_input("End Date (opt)", value=default_edate, key='new_edate')
         new_note   = st.text_area("Note",           key='new_note')
-        new_day15  = st.text_input("Day 15 Info",   key='new_day15')
-        new_day21  = st.text_input("Day 21 Info",   key='new_day21')
-        new_banking= st.text_input("Banking Info",  key='new_banking')
+        new_initial_plate_count = st.text_input("Initial Plate Count", key='new_initial_plate_count')
+        new_replaced_plate_count = st.text_input("Replaced Plate Count", key='new_replaced_plate_count')
 
         # --- Cell Count Table Editor ---
         cols = ["A", "B", "C"] + [str(i) for i in range(1, 16)]
@@ -500,9 +515,8 @@ if st.session_state['view'] == 'Batch Manager':
                 key='edit_edate'
             )
             edit_note   = st.text_area("Note", value=rec.get('note',''), key='edit_note')
-            edit_day15  = st.text_input("Day 15 Info", value=rec.get('day15',''), key='edit_day15')
-            edit_day21  = st.text_input("Day 21 Info", value=rec.get('day21',''), key='edit_day21')
-            edit_banking= st.text_input("Banking Info", value=rec.get('banking',''), key='edit_banking')
+            edit_initial_plate_count = st.text_input("Initial Plate Count", value=rec.get('initial_plate_count',''), key='edit_initial_plate_count')
+            edit_replaced_plate_count = st.text_input("Replaced Plate Count", value=rec.get('replaced_plate_count',''), key='edit_replaced_plate_count')
 
             # --- Cell Count Table Editor ---
             st.subheader("Cell count information")
@@ -576,9 +590,8 @@ if st.session_state['view'] == 'Image Viewer':
                 st.write(f"**Start Date:** {info.get('start_date', '')}")
                 st.write(f"**End Date:** {info.get('end_date', '')}")
                 st.write(f"**Note:** {info.get('note', '')}")
-                st.write(f"**Day 15 Info:** {info.get('day15', '')}")
-                st.write(f"**Day 21 Info:** {info.get('day21', '')}")
-                st.write(f"**Banking Info:** {info.get('banking', '')}")
+                st.write(f"**Initial Plate Count:** {info.get('initial_plate_count', '')}")
+                st.write(f"**Replaced Plate Count:** {info.get('replaced_plate_count', '')}")
                 # Display cell_counts sheet
                 try:
                     df_counts = pd.read_excel(counts_file, sheet_name="cell_counts", index_col=0)
