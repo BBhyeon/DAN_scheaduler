@@ -617,7 +617,7 @@ if st.session_state['view'] == 'Image Viewer':
     images_per_day = st.number_input(
         "3. Images per day (max per group)",
         min_value=1,
-        value=max(1, len(st.session_state.get("img_setup_upload", []))),
+        value=100,
         step=1,
         key="img_setup_maxday"
     )
@@ -679,41 +679,72 @@ if st.session_state['view'] == 'Image Viewer':
 
                 if not batch_counts.empty:
                     st.subheader("Cell Counts")
-                    st.dataframe(batch_counts, use_container_width=True)
+
+                    # Pivot to wide form and show only Day 15, Day 21, Banking
+                    pivot = batch_counts.set_index("phase").drop(columns=["username", "batch_id"], errors="ignore")
+                    # Ensure rows exist
+                    for ph in ["Day 15", "Day 21", "Banking"]:
+                        if ph not in pivot.index:
+                            pivot.loc[ph] = [""] * pivot.shape[1]
+                    pivot = pivot.loc[["Day 15", "Day 21", "Banking"]]
+
+                    # Display as static table
+                    st.table(pivot)
                 else:
                     st.info("No cell counts available for this batch.")
 
             st.markdown("---")
             st.write("### Uploaded Images")
 
-            # --- Group by day and dish ---
+            # Group by day
             from collections import defaultdict
             day_pat = re.compile(r"_D(\d+)_", re.IGNORECASE)
             dish_pat = re.compile(r"#([^_]+)", re.IGNORECASE)
 
             groups = defaultdict(list)
             for f in uploaded:
-                # extract day
                 m_day = day_pat.search(f.name)
                 day = m_day.group(1) if m_day else "Unknown"
                 groups[day].append(f)
 
-            # Display images per day and per dish
-            for day, files in sorted(groups.items(), key=lambda x: (int(x[0]) if x[0].isdigit() else float('inf'))):
-                st.markdown(f"### Day {day}")
-                # group by dish
-                dish_groups = defaultdict(list)
-                for f in files:
-                    m_dish = dish_pat.search(f.name)
-                    dish = m_dish.group(1) if m_dish else "Unknown"
-                    dish_groups[dish].append(f)
+            def day_sort_key(item):
+                d, _ = item
+                return int(d) if d.isdigit() else float('inf')
 
-                for dish, dfiles in sorted(dish_groups.items()):
-                    st.markdown(f"#### Dish {dish}")
-                    # sort filenames
-                    dfiles_sorted = sorted(dfiles, key=lambda f: f.name)
-                    subset = dfiles_sorted[:images_per_dish]
-                    # display rows
+            # Display images per day, with optional dish grouping
+            for day, files in sorted(groups.items(), key=day_sort_key):
+                st.markdown(f"### Day {day}")
+                # Check for any dish IDs
+                dish_ids = [dish_pat.search(f.name).group(1) for f in files if dish_pat.search(f.name)]
+                if dish_ids:
+                    # Group by dish
+                    dish_groups = defaultdict(list)
+                    for f in files:
+                        m_dish = dish_pat.search(f.name)
+                        dish = m_dish.group(1) if m_dish else "Unknown"
+                        dish_groups[dish].append(f)
+                    for dish, dfiles in sorted(dish_groups.items()):
+                        st.markdown(f"#### Dish {dish}")
+                        dfiles_sorted = sorted(dfiles, key=lambda f: f.name)
+                        subset = dfiles_sorted[:images_per_dish]
+                        for i in range(0, len(subset), images_per_row):
+                            chunk = subset[i : i + images_per_row]
+                            cols = st.columns(images_per_row)
+                            for idx, fobj in enumerate(chunk):
+                                try:
+                                    img_disp = Image.open(fobj)
+                                    cols[idx].image(img_disp, use_container_width=True)
+                                    if show_filenames == "Yes":
+                                        cols[idx].caption(fobj.name)
+                                except:
+                                    cols[idx].empty()
+                            # clear remaining cols
+                            for idx in range(len(chunk), images_per_row):
+                                cols[idx].empty()
+                else:
+                    # No dishes: show images per day only
+                    files_sorted = sorted(files, key=lambda f: f.name)
+                    subset = files_sorted[:images_per_day]
                     for i in range(0, len(subset), images_per_row):
                         chunk = subset[i : i + images_per_row]
                         cols = st.columns(images_per_row)
@@ -725,7 +756,6 @@ if st.session_state['view'] == 'Image Viewer':
                                     cols[idx].caption(fobj.name)
                             except:
                                 cols[idx].empty()
-                        # clear remaining cols
                         for idx in range(len(chunk), images_per_row):
                             cols[idx].empty()
     else:
