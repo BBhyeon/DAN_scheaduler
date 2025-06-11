@@ -702,13 +702,21 @@ if st.session_state['view'] == 'Image Viewer':
                 # sort filenames low→high
                 files_sorted = sorted(files, key=lambda f: f.name)
                 subset = files_sorted[:images_per_day]
+                # Show images in rows with dynamic number of columns
                 for i in range(0, len(subset), images_per_row):
-                    row_imgs = subset[i : i + images_per_row]
-                    cols = st.columns(len(row_imgs))
-                    for col, f in zip(cols, row_imgs):
-                        img = Image.open(f)
-                        col.image(img, use_column_width=True)
-                        if show_filenames == "Yes":
-                            col.caption(f.name)
+                    chunk = subset[i : i + images_per_row]
+                    cols = st.columns(images_per_row)
+                    for idx, fobj in enumerate(chunk):
+                        try:
+                            img_disp = Image.open(fobj)
+                            if show_filenames == "Yes":
+                                cols[idx].image(img_disp, caption=fobj.name, use_container_width=True)
+                            else:
+                                cols[idx].image(img_disp, use_container_width=True)
+                        except:
+                            cols[idx].empty()
+                    # If fewer than images_per_row, clear remaining columns
+                    for idx in range(len(chunk), images_per_row):
+                        cols[idx].empty()
     else:
         st.info("Configure settings above and click Run to view batch info and images.")
