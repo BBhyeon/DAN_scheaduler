@@ -1,4 +1,12 @@
 import streamlit as st
+st.set_page_config(page_title="DAC_manager_v11", layout="wide")
+
+# Persist login via URL query parameter
+params = st.query_params
+if "user" in params and params["user"]:
+    st.session_state["username"] = params["user"][0]
+    st.session_state["logged_in"] = True
+
 import pandas as pd
 from pandas import ExcelWriter
 from datetime import datetime, timedelta
@@ -7,76 +15,50 @@ import json
 import re
 from PIL import Image
 from streamlit_sortables import sort_items
-
-import io, base64
-from github import Github
-
-# Initialize GitHub client using Secret token
-GITHUB_TOKEN = st.secrets.get("GITHUB_TOKEN")
-gh = Github(GITHUB_TOKEN)
-repo = gh.get_repo("BBhyeon/DAN_scheaduler")
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 
 
-# Helper to ensure user's folder exists in GitHub
-def ensure_user_folder(username):
-    """
-    Creates the batches/<username>/ folder in GitHub by placing a .gitkeep if it doesn't exist.
-    """
-    folder_path = f"batches/{username}/.gitkeep"
-    try:
-        repo.get_contents(folder_path, ref="main")
-    except Exception:
-        # Attempt to create the folder; ignore if it fails
-        try:
-            repo.create_file(
-                path=folder_path,
-                message=f"Initialize folder for {username}",
-                content="",
-                branch="main"
-            )
-        except Exception:
-            # If even that fails (e.g. rate limit or 404), swallow the error
-            pass
 
-def commit_batch_to_github(username, batch_id, local_path):
-    # ensure the user folder exists
-    ensure_user_folder(username)
-    repo_path = f"batches/{username}/batch_{batch_id}.xlsx"
-    with open(local_path, "rb") as f:
-        data_bytes = f.read()
-    data_b64 = base64.b64encode(data_bytes).decode()
-    try:
-        existing = repo.get_contents(repo_path, ref="main")
-        repo.update_file(
-            path=repo_path,
-            message=f"Update batch {batch_id} for {username}",
-            content=data_b64,
-            sha=existing.sha,
-            branch="main"
-        )
-    except:
-        repo.create_file(
-            path=repo_path,
-            message=f"Add batch {batch_id} for {username}",
-            content=data_b64,
-            branch="main"
-        )
+# ——— Google Sheets settings ———
+SHEET_ID = st.secrets.get("SHEET_ID")
+if not SHEET_ID:
+    st.error("Missing SHEET_ID in Streamlit secrets. Please add your Google Sheet ID.")
+    st.stop()
 
-@st.cache_data(ttl=600)
-def fetch_user_batches(username):
-    prefix = f"batches/{username}/"
-    out = []
-    try:
-        contents = repo.get_contents(prefix, ref="main")
-        for file in contents:
-            if file.name.endswith(".xlsx"):
-                data_bytes = base64.b64decode(file.content)
-                out.append((file.name, io.BytesIO(data_bytes)))
-    except:
-        pass
-    return out
+try:
+    GSPREAD_CRED = st.secrets["GSPREAD_CRED"]
+except KeyError:
+    st.error("Missing GSPREAD_CRED in Streamlit secrets. Please add your service account JSON under that key.")
+    st.stop()
 
-st.set_page_config(page_title="DAC_manager_v11", layout="wide")
+# Authenticate to Google Sheets
+scope = ["https://spreadsheets.google.com/feeds","https://www.googleapis.com/auth/drive"]
+creds = ServiceAccountCredentials.from_json_keyfile_dict(GSPREAD_CRED, scope)
+gc    = gspread.authorize(creds)
+try:
+    sh = gc.open_by_key(SHEET_ID)
+except Exception as e:
+    st.error(f"Failed to open Google Sheet (check permissions & API): {e}")
+    st.stop()
+ws_info   = sh.worksheet("info")
+ws_counts = sh.worksheet("cell_counts")
+
+# Select the account worksheet by its gid from secrets
+GID_ACCOUNTS = int(st.secrets["GID_ACCOUNTS"])
+ws_accounts = next(ws for ws in sh.worksheets() if ws.id == GID_ACCOUNTS)
+
+@st.cache_data(ttl=300)
+def load_accounts():
+    records = ws_accounts.get_all_records()
+    df = pd.DataFrame(records)
+    # Ensure username and password columns exist
+    required = ["username", "password"]
+    for col in required:
+        if col not in df.columns:
+            df[col] = ""
+    return df[required]
+
 
 # Initialize session state flags if not present
 if "logged_in" not in st.session_state:
@@ -84,43 +66,10 @@ if "logged_in" not in st.session_state:
 if "show_create" not in st.session_state:
     st.session_state["show_create"] = False
 
-# ---------------------- CREDENTIALS FILE ----------------------
-CRED_FILE = "credentials.json"
-if os.path.exists(CRED_FILE):
-    with open(CRED_FILE, "r") as f:
-        credentials = json.load(f)
-else:
-    credentials = {}
-    with open(CRED_FILE, "w") as f:
-        json.dump(credentials, f)
+## ---------------------- CREDENTIALS from Secrets ----------------------
+# (Removed static credentials; now using Google Sheet for accounts)
 
-# ---------------------- TOP-BAR LOGIN & ACCOUNT CREATION ----------------------
-# Credentials file path
-CRED_FILE = "credentials.json"
-
-# Restore login from URL params if present
-params = st.query_params
-if "user" in params and params["user"]:
-    param_user = params["user"][0]
-    try:
-        with open(CRED_FILE, "r") as f:
-            all_creds = json.load(f)
-    except:
-        all_creds = {}
-    if param_user in all_creds:
-        st.session_state["logged_in"] = True
-        st.session_state["username"] = param_user
-        USER_BATCH_DIR = os.path.join("batches", param_user)
-        os.makedirs(USER_BATCH_DIR, exist_ok=True)
-
-# Load or initialize credentials
-if os.path.exists(CRED_FILE):
-    with open(CRED_FILE, "r") as f:
-        credentials = json.load(f)
-else:
-    credentials = {}
-    with open(CRED_FILE, "w") as f:
-        json.dump(credentials, f)
+## ---------------------- TOP-BAR LOGIN & ACCOUNT CREATION ----------------------
 
 top_bar = st.container()
 with top_bar:
@@ -145,17 +94,20 @@ with top_bar:
             if st.button("Login"):
                 if not username or not password:
                     st.warning("Please enter both username and password.")
-                elif username not in credentials or credentials[username] != password:
-                    st.error("Invalid username or password.")
                 else:
-                    st.session_state["logged_in"] = True
-                    st.session_state["username"] = username
-                    USER_BATCH_DIR = os.path.join("batches", username)
-                    os.makedirs(USER_BATCH_DIR, exist_ok=True)
-                    try:
-                        st.experimental_set_query_params(user=username)
-                    except Exception:
-                        pass
+                    accounts_df = load_accounts()
+                    # verify username exists
+                    if username not in accounts_df["username"].astype(str).tolist():
+                        st.error("Invalid username or password.")
+                    else:
+                        stored_pw = accounts_df.set_index("username").at[username, "password"]
+                        if password != str(stored_pw):
+                            st.error("Invalid username or password.")
+                        else:
+                            st.session_state["logged_in"] = True
+                            st.session_state["username"]  = username
+                            os.makedirs(os.path.join("batches", username), exist_ok=True)
+                            st.query_params = {"user": [username]}
         else:
             cols[3].markdown("")
 
@@ -166,13 +118,10 @@ with top_bar:
                 st.session_state["show_create"] = True
         else:
             if st.button("Logout"):
+                # Clear login state and URL param
                 for key in ["logged_in", "username", "view", "show_create"]:
-                    if key in st.session_state:
-                        del st.session_state[key]
-                try:
-                    st.experimental_set_query_params()
-                except Exception:
-                    pass
+                    st.session_state.pop(key, None)
+                st.query_params = {}
 
 # If not logged in and show_create is True, display create-account form in main area
 if not st.session_state.get("logged_in", False) and st.session_state.get("show_create", False):
@@ -180,16 +129,15 @@ if not st.session_state.get("logged_in", False) and st.session_state.get("show_c
     new_user = st.text_input("New Username", key="main_new_user")
     new_pass = st.text_input("New Password", type="password", key="main_new_pass")
     if st.button("Save Account", key="main_save_account"):
+        accounts_df = load_accounts()
         if not new_user or not new_pass:
             st.error("Please enter both username and password.")
-        elif new_user in credentials:
+        elif new_user in accounts_df["username"].astype(str).tolist():
             st.error("Username already exists.")
         else:
-            credentials[new_user] = new_pass
-            with open(CRED_FILE, "w") as f:
-                json.dump(credentials, f)
-            os.makedirs(os.path.join("batches", new_user), exist_ok=True)
-            st.success(f"Account '{new_user}' created! Please log in.")
+            ws_accounts.append_row([new_user, new_pass])
+            load_accounts.clear()
+            st.success(f"Account '{new_user}' created. Please login.")
             st.session_state["show_create"] = False
     st.stop()
 
@@ -197,9 +145,11 @@ if not st.session_state.get("logged_in", False) and st.session_state.get("show_c
 if not st.session_state.get("logged_in", False):
     st.stop()
 
-# We use GitHub as the backend for batch storage — no local folder needed
+# Set up user-specific batch directory
 username = st.session_state["username"]
-BATCH_DIR = f"batches/{username}"  # logical path in GitHub repo
+USER_BATCH_DIR = os.path.join("batches", username)
+BATCH_DIR = USER_BATCH_DIR
+os.makedirs(BATCH_DIR, exist_ok=True)
 PROTOCOL_FILE = "DAP_protocol_extended.xlsx"
 
 # ---------------------- TOP-BAR NAVIGATION ----------------------
@@ -221,61 +171,48 @@ with nav_bar:
 
 # ---------------------- CONFIG ----------------------
 
+
 # ---------------------- HELPERS ----------------------
-def batch_file(bid):
-    return os.path.join(BATCH_DIR, f"batch_{bid}.csv")
+# def batch_file(bid):
+#     return os.path.join(BATCH_DIR, f"batch_{bid}.csv")
 
-def save_batch(row):
-    """
-    Save a single batch’s row (dict with keys: batch_id, start_date, end_date, etc.) to its CSV.
-    """
-    r = dict(row)
-    r['start_date'] = str(r.get('start_date', ''))
-    r['end_date'] = str(r.get('end_date', ''))
-    pd.DataFrame([r]).to_csv(batch_file(r['batch_id']), index=False)
-
+# def save_batch(row):
+#     """
+#     Save a single batch’s row (dict with keys: batch_id, start_date, end_date, etc.) to its CSV.
+#     """
+#     r = dict(row)
+#     r['start_date'] = str(r.get('start_date', ''))
+#     r['end_date'] = str(r.get('end_date', ''))
+#     pd.DataFrame([r]).to_csv(batch_file(r['batch_id']), index=False)
 
 def load_batches():
-    """
-    Fetches all batch_<id>.xlsx files for the logged-in user from GitHub.
-    Returns a DataFrame with summary info from each file’s “info” sheet.
-    """
-    # ensure we fetch the latest files from GitHub each call
-    fetch_user_batches.clear()
-    batches_list = []
-    for fname, bio in fetch_user_batches(username):
-        try:
-            df_info = pd.read_excel(bio, sheet_name="info", dtype=str)
-            if df_info.empty:
-                continue
-            info_row = df_info.iloc[0].to_dict()
-            sd = pd.to_datetime(info_row.get("start_date",""), format="%Y.%m.%d", errors="coerce").date()
-            ed_raw = info_row.get("end_date","")
-            if ed_raw:
-                ed = pd.to_datetime(ed_raw, format="%Y.%m.%d", errors="coerce").date()
-            else:
-                ed = sd + timedelta(days=21) if sd else None
-            row = {
-                "batch_id": info_row.get("batch_id",""),
-                "start_date": sd,
-                "end_date": ed,
-                "cell": info_row.get("cell",""),
-                "note": info_row.get("note",""),
-                "day15": info_row.get("day15",""),
-                "day21": info_row.get("day21",""),
-                "banking": info_row.get("banking","")
-            }
-            batches_list.append(row)
-        except:
-            continue
-    if batches_list:
-        df_all = pd.DataFrame(batches_list)
-        return df_all[["batch_id","start_date","end_date","cell","note","day15","day21","banking"]]
-    else:
-        return pd.DataFrame(
-            columns=["batch_id","start_date","end_date","cell","note","day15","day21","banking"],
-            dtype=str
-        )
+    """Load all user batches from the 'info' sheet in Google Sheets."""
+    all_records = ws_info.get_all_records()
+    df = pd.DataFrame(all_records)
+    # filter to this user only
+    df = df[df["username"] == username].copy()
+    if df.empty:
+        return pd.DataFrame(columns=[
+            "batch_id",
+            "start_date",
+            "end_date",
+            "cell",
+            "note",
+            "initial_plate_count",
+            "replaced_plate_count"
+        ])
+    # parse dates
+    df["start_date"] = pd.to_datetime(df["start_date"], errors="coerce").dt.date
+    df["end_date"]   = pd.to_datetime(df["end_date"], errors="coerce").dt.date
+    return df[[
+        "batch_id",
+        "start_date",
+        "end_date",
+        "cell",
+        "note",
+        "initial_plate_count",
+        "replaced_plate_count"
+    ]]
 
 def make_calendar(df: pd.DataFrame, today: datetime.date, length: int = 22) -> pd.DataFrame:
     """
@@ -348,20 +285,21 @@ def style_calendar(df: pd.DataFrame, today: datetime.date, **kwargs):
 if 'view' not in st.session_state:
     st.session_state['view'] = 'Calendar'
 
+# Load batches and filter to those still within Day ≤ 21
+batches = load_batches()
 today = datetime.today().date()
+if not batches.empty:
+    full_cal = make_calendar(batches, today)
+    valid_ids = []
+    today_key = (str(today.year), today.strftime('%b'), today.strftime('%a %d'))
+    for bid in full_cal.index:
+        val = full_cal.loc[bid, today_key]
+        if pd.notna(val) and int(val) <= 21:
+            valid_ids.append(str(bid))
+    batches = batches[batches['batch_id'].astype(str).isin(valid_ids)].reset_index(drop=True)
 
 # ---------------------- Differentiation Calendar ----------------------
 if st.session_state['view'] == 'Calendar':
-    batches = load_batches()
-    if not batches.empty:
-        full_cal = make_calendar(batches, today)
-        valid_ids = []
-        today_key = (str(today.year), today.strftime('%b'), today.strftime('%a %d'))
-        for bid in full_cal.index:
-            val = full_cal.loc[bid, today_key]
-            if pd.notna(val) and int(val) <= 21:
-                valid_ids.append(str(bid))
-        batches = batches[batches['batch_id'].astype(str).isin(valid_ids)].reset_index(drop=True)
     st.subheader("📆 Differentiation Calendar")
     if batches.empty:
         st.info("No ongoing batches to display.")
@@ -372,19 +310,8 @@ if st.session_state['view'] == 'Calendar':
         # Display scheme image below calendar
         st.image("scheme.png", use_container_width=True)
 
-
 # ---------------------- Today's Batch Tasks ----------------------
 if st.session_state['view'] == 'Tasks':
-    batches = load_batches()
-    if not batches.empty:
-        full_cal = make_calendar(batches, today)
-        valid_ids = []
-        today_key = (str(today.year), today.strftime('%b'), today.strftime('%a %d'))
-        for bid in full_cal.index:
-            val = full_cal.loc[bid, today_key]
-            if pd.notna(val) and int(val) <= 21:
-                valid_ids.append(str(bid))
-        batches = batches[batches['batch_id'].astype(str).isin(valid_ids)].reset_index(drop=True)
     st.subheader("📌 Batch Tasks")
     selected_date = st.date_input("Select Date", value=today, key='task_date')
     if batches.empty:
@@ -515,17 +442,6 @@ if st.session_state['view'] == 'Tasks':
 
 # ---------------------- Batch Manager ----------------------
 if st.session_state['view'] == 'Batch Manager':
-    batches = load_batches()
-    if not batches.empty:
-        full_cal = make_calendar(batches, today)
-        valid_ids = []
-        today_key = (str(today.year), today.strftime('%b'), today.strftime('%a %d'))
-        for bid in full_cal.index:
-            val = full_cal.loc[bid, today_key]
-            if pd.notna(val) and int(val) <= 21:
-                valid_ids.append(str(bid))
-        batches = batches[batches['batch_id'].astype(str).isin(valid_ids)].reset_index(drop=True)
-
     st.subheader("📋 Batch Manager")
 
     if 'mode' not in st.session_state or st.session_state['mode'] == 'none':
@@ -544,17 +460,6 @@ if st.session_state['view'] == 'Batch Manager':
         if st.button("Load"):
             st.session_state['mode'] = 'edit'
             st.session_state['edit_id'] = int(load_bid)
-            # Reload batches after Load button click to ensure new files appear
-            batches = load_batches()
-            if not batches.empty:
-                full_cal = make_calendar(batches, today)
-                valid_ids = []
-                today_key = (str(today.year), today.strftime('%b'), today.strftime('%a %d'))
-                for bid in full_cal.index:
-                    val = full_cal.loc[bid, today_key]
-                    if pd.notna(val) and int(val) <= 21:
-                        valid_ids.append(str(bid))
-                batches = batches[batches['batch_id'].astype(str).isin(valid_ids)].reset_index(drop=True)
 
     if st.session_state['mode'] == 'add':
         st.subheader("Batch Information")
@@ -569,79 +474,45 @@ if st.session_state['view'] == 'Batch Manager':
         default_edate = today + timedelta(days=21)
         new_edate = st.date_input("End Date (opt)", value=default_edate, key='new_edate')
         new_note   = st.text_area("Note",           key='new_note')
-        new_day15  = st.text_input("Day 15 Info",   key='new_day15')
-        new_day21  = st.text_input("Day 21 Info",   key='new_day21')
-        new_banking= st.text_input("Banking Info",  key='new_banking')
+        new_initial_plate_count = st.text_input("Initial Plate Count", key='new_initial_plate_count')
+        new_replaced_plate_count = st.text_input("Replaced Plate Count", key='new_replaced_plate_count')
 
         # --- Cell Count Table Editor ---
         cols = ["A", "B", "C"] + [str(i) for i in range(1, 16)]
         cell_index = ["Day 15", "Day 21", "Banking"]
-        counts_file = os.path.join(BATCH_DIR, f"batch_{new_bid}.xlsx")
-        if os.path.exists(counts_file):
-            try:
-                cell_df = pd.read_excel(counts_file, sheet_name="cell_counts", index_col=0)
-            except:
-                cell_df = pd.DataFrame(index=cell_index, columns=cols)
-        else:
-            cell_df = pd.DataFrame(index=cell_index, columns=cols)
+        # No local file: always create new empty DataFrame for new batch
+        cell_df = pd.DataFrame(index=cell_index, columns=cols)
         edited_cell_df = st.data_editor(cell_df, use_container_width=True)
 
         if st.button("Save New Batch"):
-            row = {
-                "batch_id": str(new_bid),
-                "cell": new_cell,
-                "start_date": new_sdate.strftime("%Y.%m.%d"),
-                "end_date": new_edate.strftime("%Y.%m.%d") if new_edate else "",
-                "note": new_note,
-                "day15": new_day15,
-                "day21": new_day21,
-                "banking": new_banking
-            }
-            # Save summary and cell counts into Excel
-            with ExcelWriter(counts_file) as writer:
-                pd.DataFrame([row]).to_excel(writer, sheet_name="info", index=False)
-                edited_cell_df.to_excel(writer, sheet_name="cell_counts")
-            # Persist new batch file to GitHub
-            commit_batch_to_github(username, new_bid, counts_file)
-            fetch_user_batches.clear()
-            # Reload batches after saving
-            batches = load_batches()
-            if not batches.empty:
-                full_cal = make_calendar(batches, today)
-                valid_ids = []
-                today_key = (str(today.year), today.strftime('%b'), today.strftime('%a %d'))
-                for bid in full_cal.index:
-                    val = full_cal.loc[bid, today_key]
-                    if pd.notna(val) and int(val) <= 21:
-                        valid_ids.append(str(bid))
-                batches = batches[batches['batch_id'].astype(str).isin(valid_ids)].reset_index(drop=True)
-            st.success(f"Batch {new_bid} added.")
+            # Append to info sheet
+            info_row = [
+                username,
+                int(new_bid),
+                new_cell,
+                new_sdate.strftime("%Y.%m.%d"),
+                new_note,
+                new_initial_plate_count,
+                new_replaced_plate_count,
+                new_edate.strftime("%Y.%m.%d")
+            ]
+            ws_info.append_row(info_row)
+
+            # Append each cell_count row
+            for day in edited_cell_df.index:
+                row = [username, int(new_bid), day] + edited_cell_df.loc[day].fillna("").tolist()
+                ws_counts.append_row(row)
+
+                st.success(f"Batch {new_bid} created and saved to Google Sheets.")
+                # page refresh removed
 
     elif st.session_state['mode'] == 'edit':
         bid = st.session_state['edit_id']
-        counts_file = os.path.join(BATCH_DIR, f"batch_{bid}.xlsx")
         st.subheader(f"Batch Information #{bid}")
-        # Reload batches before displaying edit form (ensure latest)
-        batches = load_batches()
-        if not batches.empty:
-            full_cal = make_calendar(batches, today)
-            valid_ids = []
-            today_key = (str(today.year), today.strftime('%b'), today.strftime('%a %d'))
-            for ebid in full_cal.index:
-                val = full_cal.loc[ebid, today_key]
-                if pd.notna(val) and int(val) <= 21:
-                    valid_ids.append(str(ebid))
-            batches = batches[batches['batch_id'].astype(str).isin(valid_ids)].reset_index(drop=True)
-        # Load batch info from GitHub
-        rec = pd.DataFrame()
-        for fname, bio in fetch_user_batches(username):
-            if fname == f"batch_{bid}.xlsx":
-                try:
-                    df_info = pd.read_excel(bio, sheet_name="info", dtype=str)
-                    rec = df_info.iloc[0:1]
-                except:
-                    rec = pd.DataFrame()
-                break
+        # Load batch info from Google Sheet
+        all_info = ws_info.get_all_records()
+        info_df = pd.DataFrame(all_info)
+        rec = info_df[(info_df["username"] == username) & (info_df["batch_id"].astype(str) == str(bid))]
         if not rec.empty:
             rec = rec.iloc[0]
             edit_cell = st.text_input("Cell Type", value=rec.get('cell',''), key='edit_cell')
@@ -670,57 +541,65 @@ if st.session_state['view'] == 'Batch Manager':
                 key='edit_edate'
             )
             edit_note   = st.text_area("Note", value=rec.get('note',''), key='edit_note')
-            edit_day15  = st.text_input("Day 15 Info", value=rec.get('day15',''), key='edit_day15')
-            edit_day21  = st.text_input("Day 21 Info", value=rec.get('day21',''), key='edit_day21')
-            edit_banking= st.text_input("Banking Info", value=rec.get('banking',''), key='edit_banking')
+            edit_initial_plate_count = st.text_input("Initial Plate Count", value=rec.get('initial_plate_count',''), key='edit_initial_plate_count')
+            edit_replaced_plate_count = st.text_input("Replaced Plate Count", value=rec.get('replaced_plate_count',''), key='edit_replaced_plate_count')
 
             # --- Cell Count Table Editor ---
             st.subheader("Cell count information")
             cols = ["A", "B", "C"] + [str(i) for i in range(1, 16)]
             cell_index = ["Day 15", "Day 21", "Banking"]
-            # Load cell counts from GitHub
+            # Load cell counts from Google Sheet
+            all_counts = ws_counts.get_all_records()
+            counts_df = pd.DataFrame(all_counts)
+            batch_counts = counts_df[
+                (counts_df["username"] == username) & (counts_df["batch_id"].astype(str) == str(bid))
+            ]
             cell_df = pd.DataFrame(index=cell_index, columns=cols)
-            for fname, bio in fetch_user_batches(username):
-                if fname == f"batch_{bid}.xlsx":
-                    try:
-                        cell_df = pd.read_excel(bio, sheet_name="cell_counts", index_col=0)
-                    except:
-                        pass
-                    break
+            for _, row in batch_counts.iterrows():
+                # third column holds the phase (e.g. "Day 15", "Day 21", "Banking")
+                phase = row.iloc[2]
+                vals = [row.get(c, "") for c in cols]
+                if phase in cell_index:
+                    cell_df.loc[phase] = vals
             edited_cell_df = st.data_editor(cell_df, use_container_width=True)
 
             if st.button("Update Batch Information"):
-                new_row = {
-                    "batch_id": str(bid),
-                    "cell": edit_cell,
-                    "start_date": edit_sdate.strftime("%Y.%m.%d"),
-                    "end_date": edit_edate.strftime("%Y.%m.%d") if edit_edate else "",
-                    "note": edit_note,
-                    "day15": edit_day15,
-                    "day21": edit_day21,
-                    "banking": edit_banking
-                }
-                # Save updated summary and cell counts into the same Excel file
-                with ExcelWriter(counts_file) as writer:
-                    pd.DataFrame([new_row]).to_excel(writer, sheet_name="info", index=False)
-                    edited_cell_df.to_excel(writer, sheet_name="cell_counts")
-                # Persist updated batch file to GitHub
-                commit_batch_to_github(username, bid, counts_file)
-                fetch_user_batches.clear()
-                # Reload batches after updating
-                batches = load_batches()
-                if not batches.empty:
-                    full_cal = make_calendar(batches, today)
-                    valid_ids = []
-                    today_key = (str(today.year), today.strftime('%b'), today.strftime('%a %d'))
-                    for ebid in full_cal.index:
-                        val = full_cal.loc[ebid, today_key]
-                        if pd.notna(val) and int(val) <= 21:
-                            valid_ids.append(str(ebid))
-                    batches = batches[batches['batch_id'].astype(str).isin(valid_ids)].reset_index(drop=True)
-                st.success(f"Batch {bid} updated.")
-        else:
+                # Delete old info rows matching this batch (simple full-sheet rewrite recommended)
+                all_info = ws_info.get_all_records()
+                df_info = pd.DataFrame(all_info)
+                keep = df_info[~((df_info["username"]==username) & (df_info["batch_id"]==bid))]
+                ws_info.clear()
+                ws_info.update([keep.columns.values.tolist()] + keep.values.tolist())
+
+                updated_row = [
+                    username, bid,
+                    edit_cell,
+                    edit_sdate.strftime("%Y.%m.%d"),
+                    edit_note,
+                    edit_initial_plate_count,
+                    edit_replaced_plate_count,
+                    edit_edate.strftime("%Y.%m.%d")
+                ]
+                ws_info.append_row(updated_row)
+
+                # Clear and rewrite cell_counts for this batch
+                all_counts = ws_counts.get_all_records()
+                df_counts = pd.DataFrame(all_counts)
+                keep_c = df_counts[~((df_counts["username"]==username)&(df_counts["batch_id"]==bid))]
+                ws_counts.clear()
+                ws_counts.update([keep_c.columns.values.tolist()] + keep_c.values.tolist())
+                for day in edited_cell_df.index:
+                    row = [username, bid, day] + edited_cell_df.loc[day].fillna("").tolist()
+                    ws_counts.append_row(row)
+                st.session_state["update_ack"] = bid
+        # If no record loaded, show error
+        if rec.empty:
             st.error(f"Batch {bid} not found.")
+        else:
+            # Show update confirmation if just updated
+            if st.session_state.get("update_ack") == bid:
+                st.success(f"Batch {bid} updated in Google Sheets.")
+                del st.session_state["update_ack"]
 
 # ---------------------- Image Viewer ----------------------
 if st.session_state['view'] == 'Image Viewer':
@@ -759,43 +638,28 @@ if st.session_state['view'] == 'Image Viewer':
     # Step 3: For each batch, show batch info from Excel, then group by day and display images
     sorted_groups = {}
     for bid, files_in_batch in sorted(batch_groups.items(), key=lambda x: int(x[0]) if x[0].isdigit() else 999):
-        # Load and display batch info from GitHub
-        df_info = None
-        for fname, bio in fetch_user_batches(username):
-            if fname == f"batch_{bid}.xlsx":
+        # Load and display batch info from Excel
+        counts_file = os.path.join(BATCH_DIR, f"batch_{bid}.xlsx")
+        if os.path.exists(counts_file):
+            df_info = pd.read_excel(counts_file, sheet_name="info", dtype=str)
+            if not df_info.empty:
+                info = df_info.iloc[0].to_dict()
+                st.subheader(f"Batch {bid} Information")
+                st.write(f"**Cell Type:** {info.get('cell', '')}")
+                st.write(f"**Start Date:** {info.get('start_date', '')}")
+                st.write(f"**End Date:** {info.get('end_date', '')}")
+                st.write(f"**Note:** {info.get('note', '')}")
+                st.write(f"**Initial Plate Count:** {info.get('initial_plate_count', '')}")
+                st.write(f"**Replaced Plate Count:** {info.get('replaced_plate_count', '')}")
+                # Display cell_counts sheet
                 try:
-                    df_info = pd.read_excel(bio, sheet_name="info", dtype=str)
+                    df_counts = pd.read_excel(counts_file, sheet_name="cell_counts", index_col=0)
+                    st.subheader("Cell Counts")
+                    st.dataframe(df_counts, use_container_width=True)
                 except:
-                    df_info = None
-                break
-        if df_info is not None and not df_info.empty:
-            info = df_info.iloc[0].to_dict()
-            st.subheader(f"Batch {bid} Information")
-            st.write(f"**Cell Type:** {info.get('cell', '')}")
-            st.write(f"**Start Date:** {info.get('start_date', '')}")
-            st.write(f"**End Date:** {info.get('end_date', '')}")
-            st.write(f"**Note:** {info.get('note', '')}")
-            st.write(f"**Day 15 Info:** {info.get('day15', '')}")
-            st.write(f"**Day 21 Info:** {info.get('day21', '')}")
-            st.write(f"**Banking Info:** {info.get('banking', '')}")
+                    st.info("No cell counts data available.")
         else:
             st.subheader(f"Batch {bid} (Info not found)")
-
-        # Display cell_counts sheet from GitHub
-        df_counts = None
-        for fname, bio in fetch_user_batches(username):
-            if fname == f"batch_{bid}.xlsx":
-                try:
-                    df_counts = pd.read_excel(bio, sheet_name="cell_counts", index_col=0)
-                except:
-                    df_counts = None
-                break
-        if df_counts is not None:
-            st.subheader("Cell Counts")
-            st.dataframe(df_counts, use_container_width=True)
-        else:
-            st.info("No cell counts data available.")
-
         # Group this batch's files by day
         day_groups = {}
         for f in files_in_batch:

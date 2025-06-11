@@ -1,11 +1,6 @@
 import streamlit as st
 st.set_page_config(page_title="DAC_manager_v11", layout="wide")
 
-# Persist login via URL query parameter
-params = st.query_params
-if "user" in params and params["user"]:
-    st.session_state["username"] = params["user"][0]
-    st.session_state["logged_in"] = True
 
 import pandas as pd
 from pandas import ExcelWriter
@@ -107,7 +102,6 @@ with top_bar:
                             st.session_state["logged_in"] = True
                             st.session_state["username"]  = username
                             os.makedirs(os.path.join("batches", username), exist_ok=True)
-                            st.query_params = {"user": [username]}
         else:
             cols[3].markdown("")
 
@@ -121,7 +115,6 @@ with top_bar:
                 # Clear login state and URL param
                 for key in ["logged_in", "username", "view", "show_create"]:
                     st.session_state.pop(key, None)
-                st.query_params = {}
 
 # If not logged in and show_create is True, display create-account form in main area
 if not st.session_state.get("logged_in", False) and st.session_state.get("show_create", False):
