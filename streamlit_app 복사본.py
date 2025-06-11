@@ -1,5 +1,5 @@
 import streamlit as st
-st.set_page_config(page_title="DAC_manager_v11", layout="wide")
+st.set_page_config(page_title="DAC_manager_v12", layout="wide")
 
 
 import pandas as pd
@@ -594,88 +594,173 @@ if st.session_state['view'] == 'Batch Manager':
                 st.success(f"Batch {bid} updated in Google Sheets.")
                 del st.session_state["update_ack"]
 
+
+
+
+
+
 # ---------------------- Image Viewer ----------------------
 if st.session_state['view'] == 'Image Viewer':
-    # The following code is adapted from BIOv1.py, excluding its own set_page_config(...) call
+    st.subheader("🛠️ Image Viewer Setup")
 
-    # Step 1: Upload image files
-    uploaded_files = st.file_uploader(
-        "Drag and drop image files here (JPEG/PNG), or click to browse",
-        type=["jpg", "jpeg", "png"],
-        accept_multiple_files=True
-    )
+    # --- first row of controls ---
+    c1, c2, c3, c4 = st.columns([1,1,1,1])
+    with c1:
+        batch_id_to_view = st.number_input(
+            "Batch ID", min_value=1, step=1, key="img_setup_bid"
+        )
+    with c2:
+        images_per_row = st.number_input(
+            "Images/row", min_value=1, max_value=6, value=4, step=1, key="img_setup_cols"
+        )
+    with c3:
+        images_per_day = st.number_input(
+            "Images/day", min_value=1, value=100, step=1, key="img_setup_maxday"
+        )
+    with c4:
+        images_per_dish = st.number_input(
+            "Images/dish", min_value=1, value=4, step=1, key="img_setup_perdish"
+        )
 
-    if uploaded_files:
-        image_files = uploaded_files
-        batch_pattern = re.compile(r"^DIF(\d+)_", re.IGNORECASE)
-    else:
-        st.info("Please upload image files to proceed.")
-        st.stop()
+    # --- second row of controls ---
+    d1, d2, d3, d4 = st.columns([1,1,2,1])
+    with d1:
+        show_filenames = st.selectbox(
+            "Show filenames", ["Yes", "No"], index=0, key="img_setup_showfn"
+        )
+    with d2:
+        day_prefix = st.text_input(
+            "Day prefix", value="D", max_chars=3, key="img_setup_prefix"
+        )
+    with d3:
+        uploaded = st.file_uploader(
+            "Upload images (JPEG/PNG)", type=["jpg","jpeg","png"],
+            accept_multiple_files=True, key="img_setup_upload"
+        )
+    with d4:
+        run = st.button("Run")
 
-    # Step 2: Group images by Batch ID, then by “DAY” prefix
-    batch_pattern = re.compile(r"^DIF(\d+)_", re.IGNORECASE)
-    day_pattern   = re.compile(r"_D(\d+)_", re.IGNORECASE)
-    batch_groups  = {}
-
-    # Build batch_groups: {batch_id: [UploadedFile, ...], ...}
-    for uploaded_file in image_files:
-        fname = uploaded_file.name
-        m = batch_pattern.search(fname)
-        if m:
-            bid = m.group(1)
+    if run:
+        if not uploaded:
+            st.warning("No images uploaded.")
         else:
-            bid = "Unknown"
-        batch_groups.setdefault(bid, []).append(uploaded_file)
+            # --- Load and display batch metadata ---
+            df_info = pd.DataFrame(ws_info.get_all_records())
+            df_info["username"] = df_info["username"].astype(str).str.strip()
+            df_info["batch_id"] = pd.to_numeric(df_info["batch_id"], errors="coerce")
 
-
-    # Step 3: For each batch, show batch info from Excel, then group by day and display images
-    sorted_groups = {}
-    for bid, files_in_batch in sorted(batch_groups.items(), key=lambda x: int(x[0]) if x[0].isdigit() else 999):
-        # Load and display batch info from Excel
-        counts_file = os.path.join(BATCH_DIR, f"batch_{bid}.xlsx")
-        if os.path.exists(counts_file):
-            df_info = pd.read_excel(counts_file, sheet_name="info", dtype=str)
-            if not df_info.empty:
-                info = df_info.iloc[0].to_dict()
-                st.subheader(f"Batch {bid} Information")
-                st.write(f"**Cell Type:** {info.get('cell', '')}")
-                st.write(f"**Start Date:** {info.get('start_date', '')}")
-                st.write(f"**End Date:** {info.get('end_date', '')}")
-                st.write(f"**Note:** {info.get('note', '')}")
-                st.write(f"**Initial Plate Count:** {info.get('initial_plate_count', '')}")
-                st.write(f"**Replaced Plate Count:** {info.get('replaced_plate_count', '')}")
-                # Display cell_counts sheet
-                try:
-                    df_counts = pd.read_excel(counts_file, sheet_name="cell_counts", index_col=0)
-                    st.subheader("Cell Counts")
-                    st.dataframe(df_counts, use_container_width=True)
-                except:
-                    st.info("No cell counts data available.")
-        else:
-            st.subheader(f"Batch {bid} (Info not found)")
-        # Group this batch's files by day
-        day_groups = {}
-        for f in files_in_batch:
-            fname = f.name
-            m = day_pattern.search(fname)
-            if m:
-                day = m.group(1)
+            rec = df_info[
+                (df_info["username"] == username) &
+                (df_info["batch_id"] == batch_id_to_view)
+            ]
+            if rec.empty:
+                st.error(f"Batch {batch_id_to_view} not found.")
             else:
-                day = "Unknown"
-            day_groups.setdefault(day, []).append(f)
-        # Display each day group
-        for day, files in sorted(day_groups.items(), key=lambda x: int(x[0]) if x[0].isdigit() else 999):
-            st.markdown(f"**Day {day}**")
-            # Show images in rows of four for this day
-            for i in range(0, len(files), 4):
-                chunk = files[i:i+4]
-                cols4 = st.columns(4)
-                for idx, fobj in enumerate(chunk):
-                    try:
-                        img_disp = Image.open(fobj)
-                        cols4[idx].image(img_disp, caption=fobj.name, use_container_width=True)
-                    except:
-                        cols4[idx].empty()
-                # Fill remaining columns if fewer than 4
-                for idx in range(len(chunk), 4):
-                    cols4[idx].empty()
+                rec = rec.iloc[0]
+                st.markdown(f"**Batch {batch_id_to_view} Information**")
+                st.write(f"• **Cell Type:** {rec['cell']}")
+                st.write(f"• **Start Date:** {rec['start_date']}")
+                st.write(f"• **End Date:** {rec['end_date']}")
+                st.write(f"• **Note:** {rec['note']}")
+                st.write(f"• **Initial Plate Count:** {rec['initial_plate_count']}")
+                st.write(f"• **Replaced Plate Count:** {rec['replaced_plate_count']}")
+                st.markdown("---")
+
+                # --- Display cell counts if available ---
+                df_counts = pd.DataFrame(ws_counts.get_all_records())
+                df_counts["username"] = df_counts["username"].astype(str).str.strip()
+                df_counts["batch_id"] = pd.to_numeric(df_counts["batch_id"], errors="coerce")
+
+                batch_counts = df_counts[
+                    (df_counts["username"] == username) &
+                    (df_counts["batch_id"] == batch_id_to_view)
+                ]
+
+                if not batch_counts.empty:
+                    st.subheader("Cell Counts")
+
+                    # Rename the third column to 'phase' if needed
+                    if "phase" not in batch_counts.columns and len(batch_counts.columns) > 2:
+                        batch_counts = batch_counts.rename(columns={batch_counts.columns[2]: "phase"})
+                    # Pivot to wide form and show only Day 15, Day 21, Banking
+                    pivot = batch_counts.set_index("phase").drop(columns=["username", "batch_id"], errors="ignore")
+                    # Ensure rows exist
+                    for ph in ["Day 15", "Day 21", "Banking"]:
+                        if ph not in pivot.index:
+                            pivot.loc[ph] = [""] * pivot.shape[1]
+                    pivot = pivot.loc[["Day 15", "Day 21", "Banking"]]
+                    # Drop columns where all values are blank or NaN
+                    pivot = pivot.replace("", pd.NA).dropna(axis=1, how="all")
+                    # Display as static table
+                    st.table(pivot)
+                else:
+                    st.info("No cell counts available for this batch.")
+
+            st.markdown("---")
+            st.write("### Uploaded Images")
+
+            # Group by day
+            from collections import defaultdict
+            # Match underscore + prefix + digits + underscore (ignore other occurrences)
+            day_pat = re.compile(rf"_{re.escape(day_prefix)}(\d+)_", re.IGNORECASE)
+            dish_pat = re.compile(r"#([^_]+)", re.IGNORECASE)
+
+            groups = defaultdict(list)
+            for f in uploaded:
+                m_day = day_pat.search(f.name)
+                day = m_day.group(1) if m_day else "Unknown"
+                groups[day].append(f)
+
+            def day_sort_key(item):
+                d, _ = item
+                return int(d) if d.isdigit() else float('inf')
+
+            # Display images per day, with optional dish grouping
+            for day, files in sorted(groups.items(), key=day_sort_key):
+                st.markdown(f"### Day {day}")
+                # Check for any dish IDs
+                dish_ids = [dish_pat.search(f.name).group(1) for f in files if dish_pat.search(f.name)]
+                if dish_ids:
+                    # Group by dish
+                    dish_groups = defaultdict(list)
+                    for f in files:
+                        m_dish = dish_pat.search(f.name)
+                        dish = m_dish.group(1) if m_dish else "Unknown"
+                        dish_groups[dish].append(f)
+                    for dish, dfiles in sorted(dish_groups.items()):
+                        st.markdown(f"#### Dish {dish}")
+                        dfiles_sorted = sorted(dfiles, key=lambda f: f.name)
+                        subset = dfiles_sorted[:images_per_dish]
+                        for i in range(0, len(subset), images_per_row):
+                            chunk = subset[i : i + images_per_row]
+                            cols = st.columns(images_per_row)
+                            for idx, fobj in enumerate(chunk):
+                                try:
+                                    img_disp = Image.open(fobj)
+                                    cols[idx].image(img_disp, use_container_width=True)
+                                    if show_filenames == "Yes":
+                                        cols[idx].caption(fobj.name)
+                                except:
+                                    cols[idx].empty()
+                            # clear remaining cols
+                            for idx in range(len(chunk), images_per_row):
+                                cols[idx].empty()
+                else:
+                    # No dishes: show images per day only
+                    files_sorted = sorted(files, key=lambda f: f.name)
+                    subset = files_sorted[:images_per_day]
+                    for i in range(0, len(subset), images_per_row):
+                        chunk = subset[i : i + images_per_row]
+                        cols = st.columns(images_per_row)
+                        for idx, fobj in enumerate(chunk):
+                            try:
+                                img_disp = Image.open(fobj)
+                                cols[idx].image(img_disp, use_container_width=True)
+                                if show_filenames == "Yes":
+                                    cols[idx].caption(fobj.name)
+                            except:
+                                cols[idx].empty()
+                        for idx in range(len(chunk), images_per_row):
+                            cols[idx].empty()
+    else:
+        st.info("Configure settings above and click Run to view batch info and images.")
