@@ -602,47 +602,46 @@ if st.session_state['view'] == 'Image Viewer':
     batch_id_to_view = st.number_input(
         "Batch ID to View", min_value=1, step=1, key="img_view_bid"
     )
-    if st.button("Load Batch Info"):
-        # Load batch metadata from the 'info' worksheet
-        all_info = ws_info.get_all_records()
-        info_df  = pd.DataFrame(all_info)
-        # Normalize types and strip whitespace
-        info_df["username"] = info_df["username"].astype(str).str.strip()
-        info_df["batch_id"] = pd.to_numeric(info_df["batch_id"], errors="coerce")
-        rec = info_df[
-            (info_df["username"] == username) &
-            (info_df["batch_id"] == batch_id_to_view)
-        ]
-        if rec.empty:
-            st.error(f"Batch {batch_id_to_view} not found.")
-        else:
-            rec = rec.iloc[0]
-            st.markdown(f"**Batch {batch_id_to_view} Information**")
-            st.write(f"• **Cell Type:** {rec.get('cell','')}")
-            st.write(f"• **Start Date:** {rec.get('start_date','')}")
-            st.write(f"• **End Date:** {rec.get('end_date','')}")
-            st.write(f"• **Note:** {rec.get('note','')}")
-            st.write(f"• **Initial Plate Count:** {rec.get('initial_plate_count','')}")
-            st.write(f"• **Replaced Plate Count:** {rec.get('replaced_plate_count','')}")
+    # Load batch metadata from the 'info' worksheet immediately after selection
+    all_info = ws_info.get_all_records()
+    info_df  = pd.DataFrame(all_info)
+    # Normalize types and strip whitespace
+    info_df["username"] = info_df["username"].astype(str).str.strip()
+    info_df["batch_id"] = pd.to_numeric(info_df["batch_id"], errors="coerce")
+    rec = info_df[
+        (info_df["username"] == username) &
+        (info_df["batch_id"] == batch_id_to_view)
+    ]
+    if rec.empty:
+        st.error(f"Batch {batch_id_to_view} not found.")
+    else:
+        rec = rec.iloc[0]
+        st.markdown(f"**Batch {batch_id_to_view} Information**")
+        st.write(f"• **Cell Type:** {rec.get('cell','')}")
+        st.write(f"• **Start Date:** {rec.get('start_date','')}")
+        st.write(f"• **End Date:** {rec.get('end_date','')}")
+        st.write(f"• **Note:** {rec.get('note','')}")
+        st.write(f"• **Initial Plate Count:** {rec.get('initial_plate_count','')}")
+        st.write(f"• **Replaced Plate Count:** {rec.get('replaced_plate_count','')}")
 
-            # Load and display cell_counts
-            all_counts = ws_counts.get_all_records()
-            counts_df  = pd.DataFrame(all_counts)
-            # Normalize types and strip whitespace for counts_df
-            counts_df["username"] = counts_df["username"].astype(str).str.strip()
-            counts_df["batch_id"] = pd.to_numeric(counts_df["batch_id"], errors="coerce")
-            batch_counts = counts_df[
-                (counts_df["username"] == username) &
-                (counts_df["batch_id"] == batch_id_to_view)
-            ]
-            if not batch_counts.empty:
-                st.subheader("Cell Counts")
-                st.dataframe(
-                    batch_counts.set_index("phase"),
-                    use_container_width=True
-                )
-            else:
-                st.info("No cell counts available for this batch.")
+        # Load and display cell_counts
+        all_counts = ws_counts.get_all_records()
+        counts_df  = pd.DataFrame(all_counts)
+        # Normalize types and strip whitespace for counts_df
+        counts_df["username"] = counts_df["username"].astype(str).str.strip()
+        counts_df["batch_id"] = pd.to_numeric(counts_df["batch_id"], errors="coerce")
+        batch_counts = counts_df[
+            (counts_df["username"] == username) &
+            (counts_df["batch_id"] == batch_id_to_view)
+        ]
+        if not batch_counts.empty:
+            st.subheader("Cell Counts")
+            st.dataframe(
+                batch_counts.set_index("phase"),
+                use_container_width=True
+            )
+        else:
+            st.info("No cell counts available for this batch.")
 
     st.markdown("---")
     st.write("### Upload and Preview Images")
