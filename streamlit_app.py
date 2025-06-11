@@ -598,68 +598,68 @@ if st.session_state['view'] == 'Batch Manager':
 if st.session_state['view'] == 'Image Viewer':
     st.subheader("🖼️ Image Viewer")
 
-    # 1) Input Batch ID to load info and counts
+    # Optional Batch ID filter
     batch_id_to_view = st.number_input(
-        "Batch ID to View", min_value=1, step=1, key="img_view_bid"
+        "Batch ID to View (optional)", min_value=1, step=1, key="img_view_bid"
     )
 
+    # File uploader for images
+    uploaded = st.file_uploader(
+        "Drag & drop image files here (JPEG/PNG), or click to browse",
+        type=["jpg", "jpeg", "png"],
+        accept_multiple_files=True
+    )
+    if not uploaded:
+        st.info("Please upload image files to proceed.")
+        st.stop()
+
+    # Layout controls
+    cols_per_row = st.slider("Images per row", 1, 6, 4)
+    max_per_group = st.number_input(
+        "Max images per day", min_value=1, value=len(uploaded)
+    )
+    show_filenames = st.checkbox("Show filenames", value=False)
+
+    # Load & display batch info if ID provided
     if batch_id_to_view:
-        # Load and display batch metadata
-        info_records = ws_info.get_all_records()
-        df_info = pd.DataFrame(info_records)
+        df_info = pd.DataFrame(ws_info.get_all_records())
         df_info["username"] = df_info["username"].astype(str).str.strip()
         df_info["batch_id"] = pd.to_numeric(df_info["batch_id"], errors="coerce")
-
         rec = df_info[
             (df_info["username"] == username) &
             (df_info["batch_id"] == batch_id_to_view)
         ]
-
         if rec.empty:
             st.error(f"Batch {batch_id_to_view} not found.")
         else:
             rec = rec.iloc[0]
             st.markdown(f"**Batch {batch_id_to_view} Information**")
-            st.write(f"• **Cell Type:** {rec.get('cell','')}")
-            st.write(f"• **Start Date:** {rec.get('start_date','')}")
-            st.write(f"• **End Date:** {rec.get('end_date','')}")
-            st.write(f"• **Note:** {rec.get('note','')}")
-            st.write(f"• **Initial Plate Count:** {rec.get('initial_plate_count','')}")
-            st.write(f"• **Replaced Plate Count:** {rec.get('replaced_plate_count','')}")
+            st.write(f"• **Cell Type:** {rec['cell']}")
+            st.write(f"• **Start Date:** {rec['start_date']}")
+            st.write(f"• **End Date:** {rec['end_date']}")
+            st.write(f"• **Note:** {rec['note']}")
+            st.write(f"• **Initial Plate Count:** {rec['initial_plate_count']}")
+            st.write(f"• **Replaced Plate Count:** {rec['replaced_plate_count']}")
+            st.markdown("---")
 
-            # Load and display cell counts
-            count_records = ws_counts.get_all_records()
-            df_counts = pd.DataFrame(count_records)
-            df_counts["username"] = df_counts["username"].astype(str).str.strip()
-            df_counts["batch_id"] = pd.to_numeric(df_counts["batch_id"], errors="coerce")
+    # Group uploaded files by day parsed from filename
+    from collections import defaultdict
+    day_pat = re.compile(r"_D(\d+)_", re.IGNORECASE)
+    groups = defaultdict(list)
+    for f in uploaded:
+        m = day_pat.search(f.name)
+        day = m.group(1) if m else "Unknown"
+        groups[day].append(f)
 
-            batch_counts = df_counts[
-                (df_counts["username"] == username) &
-                (df_counts["batch_id"] == batch_id_to_view)
-            ]
-            if not batch_counts.empty:
-                st.subheader("Cell Counts")
-                st.dataframe(batch_counts.set_index("phase"), use_container_width=True)
-            else:
-                st.info("No cell counts available for this batch.")
-
-    # Separator
-    st.markdown("---")
-
-    # 2) Image upload area
-    st.write("### Upload and Preview Images")
-    uploaded = st.file_uploader(
-        "Drag & drop image files here (JPEG/PNG) or click to browse",
-        type=["jpg", "jpeg", "png"],
-        accept_multiple_files=True
-    )
-    if uploaded:
-        cols = st.columns(4)
-        for i, f in enumerate(uploaded):
-            try:
+    # Display each day group
+    for day, files in sorted(groups.items(), key=lambda x: x[0]):
+        st.markdown(f"### Day {day}")
+        subset = files[:max_per_group]
+        for i in range(0, len(subset), cols_per_row):
+            row = subset[i : i + cols_per_row]
+            cols = st.columns(len(row))
+            for col, f in zip(cols, row):
                 img = Image.open(f)
-                cols[i % 4].image(img, caption=f.name, use_container_width=True)
-            except Exception:
-                cols[i % 4].empty()
-    else:
-        st.info("Please enter a Batch ID and upload image files.")
+                col.image(img, use_container_width=True)
+                if show_filenames:
+                    col.caption(f.name)
