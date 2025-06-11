@@ -595,23 +595,23 @@ if st.session_state['view'] == 'Batch Manager':
                 del st.session_state["update_ack"]
 
 # ---------------------- Image Viewer ----------------------
+# ---------------------- Image Viewer ----------------------
 if st.session_state['view'] == 'Image Viewer':
     st.subheader("🖼️ Image Viewer")
 
-    # Input Batch ID and immediately load its metadata
+    # 1) Batch ID input & load metadata + cell counts
     batch_id_to_view = st.number_input(
         "Batch ID to View", min_value=1, step=1, key="img_view_bid"
     )
 
-    # Load batch info from the 'info' sheet
     all_info = ws_info.get_all_records()
-    info_df  = pd.DataFrame(all_info)
-    info_df["username"] = info_df["username"].astype(str).str.strip()
-    info_df["batch_id"] = pd.to_numeric(info_df["batch_id"], errors="coerce")
+    df_info  = pd.DataFrame(all_info)
+    df_info["username"] = df_info["username"].astype(str).str.strip()
+    df_info["batch_id"] = pd.to_numeric(df_info["batch_id"], errors="coerce")
 
-    rec = info_df[
-        (info_df["username"] == username) &
-        (info_df["batch_id"] == batch_id_to_view)
+    rec = df_info[
+        (df_info["username"] == username) &
+        (df_info["batch_id"] == batch_id_to_view)
     ]
 
     if rec.empty:
@@ -626,15 +626,14 @@ if st.session_state['view'] == 'Image Viewer':
         st.write(f"• **Initial Plate Count:** {rec.get('initial_plate_count','')}")
         st.write(f"• **Replaced Plate Count:** {rec.get('replaced_plate_count','')}")
 
-        # Load and display cell counts
         all_counts = ws_counts.get_all_records()
-        counts_df  = pd.DataFrame(all_counts)
-        counts_df["username"] = counts_df["username"].astype(str).str.strip()
-        counts_df["batch_id"] = pd.to_numeric(counts_df["batch_id"], errors="coerce")
+        df_counts  = pd.DataFrame(all_counts)
+        df_counts["username"] = df_counts["username"].astype(str).str.strip()
+        df_counts["batch_id"] = pd.to_numeric(df_counts["batch_id"], errors="coerce")
 
-        batch_counts = counts_df[
-            (counts_df["username"] == username) &
-            (counts_df["batch_id"] == batch_id_to_view)
+        batch_counts = df_counts[
+            (df_counts["username"] == username) &
+            (df_counts["batch_id"] == batch_id_to_view)
         ]
 
         if not batch_counts.empty:
