@@ -602,32 +602,34 @@ if st.session_state['view'] == 'Batch Manager':
 if st.session_state['view'] == 'Image Viewer':
     st.subheader("🛠️ Image Viewer Setup")
 
-    # ─── first row of controls ─────────────────────────────────────
-    c1, c2, c3, c4 = st.columns([1,1,1,1])
-    with c1:
+    # First row: Batch ID, Filename Prefix, Show Filenames
+    r1c1, r1c2, r1c3 = st.columns([1,1,1])
+    with r1c1:
         batch_id_to_view = st.number_input("Batch ID", min_value=1, step=1, key="img_setup_bid")
-    with c2:
+    with r1c2:
+        day_prefix = st.text_input("Filename prefix", "D", max_chars=3, key="img_setup_prefix")
+    with r1c3:
+        show_filenames = st.selectbox("Show filenames", ["Yes", "No"], index=0, key="img_setup_showfn")
+
+    # Second row: Images per row, per day, per dish
+    r2c1, r2c2, r2c3 = st.columns([1,1,1])
+    with r2c1:
         images_per_row = st.number_input("Images/row", 1, 6, 4, key="img_setup_cols")
-    with c3:
+    with r2c2:
         images_per_day = st.number_input("Images/day", 1, 100, 100, key="img_setup_maxday")
-    with c4:
+    with r2c3:
         images_per_dish = st.number_input("Images/dish", 1, 10, 4, key="img_setup_perdish")
 
-    # ─── second row of controls ──────────────────────────────────
-    d1, d2, d3, d4, d5 = st.columns([1,1,1,2,1])
-    with d1:
-        show_filenames = st.selectbox("Show filenames", ["Yes","No"], index=0, key="img_setup_showfn")
-    with d2:
-        day_prefix = st.text_input("Day prefix", "D", max_chars=3, key="img_setup_prefix")
-    with d3:
-        # New Day-range slider
-        day_range = st.slider("Day range", 0, 100, (0,21), key="img_setup_drange")
-    with d4:
-        uploaded = st.file_uploader("Upload images (JPEG/PNG)", 
-                                   type=["jpg","jpeg","png"],
-                                   accept_multiple_files=True,
-                                   key="img_setup_upload")
-    with d5:
+    # Third row: Upload images and Run button
+    r3c1, r3c2 = st.columns([3,1])
+    with r3c1:
+        uploaded = st.file_uploader(
+            "Upload images (JPEG/PNG)",
+            type=["jpg", "jpeg", "png"],
+            accept_multiple_files=True,
+            key="img_setup_upload"
+        )
+    with r3c2:
         run = st.button("Run")
 
     if run:
@@ -695,12 +697,6 @@ if st.session_state['view'] == 'Image Viewer':
         for f in uploaded:
             m = day_pat.search(f.name)
             day = m.group(1) if m else "Unknown"
-            # filter by day range
-            if day.isdigit():
-                lo,hi = st.session_state["img_setup_drange"]
-                d = int(day)
-                if d<lo or d>hi:
-                    continue
             groups[day].append(f)
 
         # sort days
