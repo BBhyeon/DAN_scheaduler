@@ -596,86 +596,62 @@ if st.session_state['view'] == 'Batch Manager':
 
 # ---------------------- Image Viewer ----------------------
 if st.session_state['view'] == 'Image Viewer':
-    # The following code is adapted from BIOv1.py, excluding its own set_page_config(...) call
+    st.subheader("🖼️ Image Viewer")
 
-    # Step 1: Upload image files
-    uploaded_files = st.file_uploader(
-        "Drag and drop image files here (JPEG/PNG), or click to browse",
+    # Step 1: Select Batch ID to load
+    batch_id_to_view = st.number_input(
+        "Batch ID to View", min_value=1, step=1, key="img_view_bid"
+    )
+    if st.button("Load Batch Info"):
+        # Load batch metadata from the 'info' worksheet
+        all_info = ws_info.get_all_records()
+        info_df  = pd.DataFrame(all_info)
+        rec = info_df[
+            (info_df["username"] == username) &
+            (info_df["batch_id"].astype(int) == int(batch_id_to_view))
+        ]
+        if rec.empty:
+            st.error(f"Batch {batch_id_to_view} not found.")
+        else:
+            rec = rec.iloc[0]
+            st.markdown(f"**Batch {batch_id_to_view} Information**")
+            st.write(f"• **Cell Type:** {rec.get('cell','')}")
+            st.write(f"• **Start Date:** {rec.get('start_date','')}")
+            st.write(f"• **End Date:** {rec.get('end_date','')}")
+            st.write(f"• **Note:** {rec.get('note','')}")
+            st.write(f"• **Initial Plate Count:** {rec.get('initial_plate_count','')}")
+            st.write(f"• **Replaced Plate Count:** {rec.get('replaced_plate_count','')}")
+
+            # Load and display cell_counts
+            all_counts = ws_counts.get_all_records()
+            counts_df  = pd.DataFrame(all_counts)
+            batch_counts = counts_df[
+                (counts_df["username"] == username) &
+                (counts_df["batch_id"].astype(int) == int(batch_id_to_view))
+            ]
+            if not batch_counts.empty:
+                st.subheader("Cell Counts")
+                st.dataframe(
+                    batch_counts.set_index("phase"),
+                    use_container_width=True
+                )
+            else:
+                st.info("No cell counts available for this batch.")
+
+    st.markdown("---")
+    st.write("### Upload and Preview Images")
+    uploaded = st.file_uploader(
+        "Drag & drop image files here (JPEG/PNG) or click to browse",
         type=["jpg", "jpeg", "png"],
         accept_multiple_files=True
     )
-
-    if uploaded_files:
-        image_files = uploaded_files
-        batch_pattern = re.compile(r"^DIF(\d+)_", re.IGNORECASE)
+    if uploaded:
+        cols = st.columns(4)
+        for i, f in enumerate(uploaded):
+            try:
+                img = Image.open(f)
+                cols[i % 4].image(img, caption=f.name, use_container_width=True)
+            except:
+                cols[i % 4].empty()
     else:
-        st.info("Please upload image files to proceed.")
-        st.stop()
-
-    # Step 2: Group images by Batch ID, then by “DAY” prefix
-    batch_pattern = re.compile(r"^DIF(\d+)_", re.IGNORECASE)
-    day_pattern   = re.compile(r"_D(\d+)_", re.IGNORECASE)
-    batch_groups  = {}
-
-    # Build batch_groups: {batch_id: [UploadedFile, ...], ...}
-    for uploaded_file in image_files:
-        fname = uploaded_file.name
-        m = batch_pattern.search(fname)
-        if m:
-            bid = m.group(1)
-        else:
-            bid = "Unknown"
-        batch_groups.setdefault(bid, []).append(uploaded_file)
-
-
-    # Step 3: For each batch, show batch info from Excel, then group by day and display images
-    sorted_groups = {}
-    for bid, files_in_batch in sorted(batch_groups.items(), key=lambda x: int(x[0]) if x[0].isdigit() else 999):
-        # Load and display batch info from Excel
-        counts_file = os.path.join(BATCH_DIR, f"batch_{bid}.xlsx")
-        if os.path.exists(counts_file):
-            df_info = pd.read_excel(counts_file, sheet_name="info", dtype=str)
-            if not df_info.empty:
-                info = df_info.iloc[0].to_dict()
-                st.subheader(f"Batch {bid} Information")
-                st.write(f"**Cell Type:** {info.get('cell', '')}")
-                st.write(f"**Start Date:** {info.get('start_date', '')}")
-                st.write(f"**End Date:** {info.get('end_date', '')}")
-                st.write(f"**Note:** {info.get('note', '')}")
-                st.write(f"**Initial Plate Count:** {info.get('initial_plate_count', '')}")
-                st.write(f"**Replaced Plate Count:** {info.get('replaced_plate_count', '')}")
-                # Display cell_counts sheet
-                try:
-                    df_counts = pd.read_excel(counts_file, sheet_name="cell_counts", index_col=0)
-                    st.subheader("Cell Counts")
-                    st.dataframe(df_counts, use_container_width=True)
-                except:
-                    st.info("No cell counts data available.")
-        else:
-            st.subheader(f"Batch {bid} (Info not found)")
-        # Group this batch's files by day
-        day_groups = {}
-        for f in files_in_batch:
-            fname = f.name
-            m = day_pattern.search(fname)
-            if m:
-                day = m.group(1)
-            else:
-                day = "Unknown"
-            day_groups.setdefault(day, []).append(f)
-        # Display each day group
-        for day, files in sorted(day_groups.items(), key=lambda x: int(x[0]) if x[0].isdigit() else 999):
-            st.markdown(f"**Day {day}**")
-            # Show images in rows of four for this day
-            for i in range(0, len(files), 4):
-                chunk = files[i:i+4]
-                cols4 = st.columns(4)
-                for idx, fobj in enumerate(chunk):
-                    try:
-                        img_disp = Image.open(fobj)
-                        cols4[idx].image(img_disp, caption=fobj.name, use_container_width=True)
-                    except:
-                        cols4[idx].empty()
-                # Fill remaining columns if fewer than 4
-                for idx in range(len(chunk), 4):
-                    cols4[idx].empty()
+        st.info("Please upload image files to preview them.")
