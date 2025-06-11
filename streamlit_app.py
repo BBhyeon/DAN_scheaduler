@@ -595,24 +595,18 @@ if st.session_state['view'] == 'Batch Manager':
                 del st.session_state["update_ack"]
 
 # ---------------------- Image Viewer ----------------------
-# ---------------------- Image Viewer ----------------------
 if st.session_state['view'] == 'Image Viewer':
     st.subheader("🖼️ Image Viewer")
 
-    # 1) Batch ID input & load metadata + cell counts
-    batch_id_to_view = st.number_input(
-        "Batch ID to View", min_value=1, step=1, key="img_view_bid"
-    )
+    # Batch ID input & metadata + cell counts loader
+    batch_id_to_view = st.number_input("Batch ID to View", min_value=1, step=1, key="img_view_bid")
 
-    all_info = ws_info.get_all_records()
-    df_info  = pd.DataFrame(all_info)
+    # Load and filter info
+    info_records = ws_info.get_all_records()
+    df_info = pd.DataFrame(info_records)
     df_info["username"] = df_info["username"].astype(str).str.strip()
     df_info["batch_id"] = pd.to_numeric(df_info["batch_id"], errors="coerce")
-
-    rec = df_info[
-        (df_info["username"] == username) &
-        (df_info["batch_id"] == batch_id_to_view)
-    ]
+    rec = df_info[(df_info["username"] == username) & (df_info["batch_id"] == batch_id_to_view)]
 
     if rec.empty:
         st.error(f"Batch {batch_id_to_view} not found.")
@@ -626,16 +620,15 @@ if st.session_state['view'] == 'Image Viewer':
         st.write(f"• **Initial Plate Count:** {rec.get('initial_plate_count','')}")
         st.write(f"• **Replaced Plate Count:** {rec.get('replaced_plate_count','')}")
 
-        all_counts = ws_counts.get_all_records()
-        df_counts  = pd.DataFrame(all_counts)
+        # Load and display cell counts
+        count_records = ws_counts.get_all_records()
+        df_counts = pd.DataFrame(count_records)
         df_counts["username"] = df_counts["username"].astype(str).str.strip()
         df_counts["batch_id"] = pd.to_numeric(df_counts["batch_id"], errors="coerce")
-
         batch_counts = df_counts[
-            (df_counts["username"] == username) &
+            (df_counts["username"] == username) & 
             (df_counts["batch_id"] == batch_id_to_view)
         ]
-
         if not batch_counts.empty:
             st.subheader("Cell Counts")
             st.dataframe(batch_counts.set_index("phase"), use_container_width=True)
@@ -649,14 +642,13 @@ if st.session_state['view'] == 'Image Viewer':
         type=["jpg", "jpeg", "png"],
         accept_multiple_files=True
     )
-
     if uploaded:
         cols = st.columns(4)
         for i, f in enumerate(uploaded):
             try:
                 img = Image.open(f)
                 cols[i % 4].image(img, caption=f.name, use_container_width=True)
-            except Exception:
+            except:
                 cols[i % 4].empty()
     else:
         st.info("Please upload image files to preview them.")
