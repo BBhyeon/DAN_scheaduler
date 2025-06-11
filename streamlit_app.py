@@ -623,17 +623,21 @@ if st.session_state['view'] == 'Image Viewer':
         )
 
     # --- second row of controls ---
-    d1, d2, d3 = st.columns([1,2,1])
+    d1, d2, d3, d4 = st.columns([1,1,2,1])
     with d1:
         show_filenames = st.selectbox(
             "Show filenames", ["Yes", "No"], index=0, key="img_setup_showfn"
         )
     with d2:
+        day_prefix = st.text_input(
+            "Day prefix", value="D", max_chars=3, key="img_setup_prefix"
+        )
+    with d3:
         uploaded = st.file_uploader(
             "Upload images (JPEG/PNG)", type=["jpg","jpeg","png"],
             accept_multiple_files=True, key="img_setup_upload"
         )
-    with d3:
+    with d4:
         run = st.button("Run")
 
     if run:
@@ -697,7 +701,8 @@ if st.session_state['view'] == 'Image Viewer':
 
             # Group by day
             from collections import defaultdict
-            day_pat = re.compile(r"_D(\d+)_", re.IGNORECASE)
+            # Match underscore + prefix + digits + underscore (ignore other occurrences)
+            day_pat = re.compile(rf"_{re.escape(day_prefix)}(\d+)_", re.IGNORECASE)
             dish_pat = re.compile(r"#([^_]+)", re.IGNORECASE)
 
             groups = defaultdict(list)
