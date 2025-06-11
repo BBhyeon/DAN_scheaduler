@@ -633,7 +633,7 @@ if st.session_state['view'] == 'Image Viewer':
     if run:
         if not uploaded:
             st.warning("No images uploaded.")
-            return
+            st.stop()
 
         # 1) Batch info
         if batch_id_to_view:
