@@ -646,11 +646,12 @@ if st.session_state['view'] == 'Image Viewer':
                 st.error(f"Batch {batch_id_to_view} not found.")
             else:
                 rec = rec.iloc[0]
-                st.markdown(f"**Batch {batch_id_to_view} Information**")
+                st.subheader(f"Batch {batch_id_to_view} Information")
                 st.write(f"• Cell Type: {rec['cell']}")
                 st.write(f"• Start Date: {rec['start_date']}")
                 st.write(f"• End Date: {rec['end_date']}")
-                st.write(f"• Note: {rec['note']}")
+                st.markdown("**Note:**")
+                st.write(rec["note"])
                 st.write(f"• Initial Count: {rec['initial_plate_count']}")
                 st.write(f"• Replaced Count: {rec['replaced_plate_count']}")
                 st.markdown("---")
