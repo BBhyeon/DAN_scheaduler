@@ -602,35 +602,31 @@ if st.session_state['view'] == 'Batch Manager':
 if st.session_state['view'] == 'Image Viewer':
     st.subheader("🛠️ Image Viewer Setup")
 
-    # First row: Batch ID, Filename Prefix, Show Filenames
-    r1c1, r1c2, r1c3 = st.columns([1,1,1])
-    with r1c1:
+    # All controls on one row
+    cols = st.columns(6)
+    with cols[0]:
         batch_id_to_view = st.number_input("Batch ID", min_value=1, step=1, key="img_setup_bid")
-    with r1c2:
-        day_prefix = st.text_input("Filename prefix", "D", max_chars=3, key="img_setup_prefix")
-    with r1c3:
-        show_filenames = st.selectbox("Show filenames", ["Yes", "No"], index=0, key="img_setup_showfn")
-
-    # Second row: Images per row, per day, per dish
-    r2c1, r2c2, r2c3 = st.columns([1,1,1])
-    with r2c1:
+    with cols[1]:
+        day_prefix = st.text_input("Day prefix", "D", max_chars=3, key="img_setup_prefix")
+    with cols[2]:
+        show_filenames = st.selectbox("Show filenames", ["Yes","No"], index=0, key="img_setup_showfn")
+    with cols[3]:
         images_per_row = st.number_input("Images/row", 1, 6, 4, key="img_setup_cols")
-    with r2c2:
+    with cols[4]:
         images_per_day = st.number_input("Images/day", 1, 100, 100, key="img_setup_maxday")
-    with r2c3:
+    with cols[5]:
         images_per_dish = st.number_input("Images/dish", 1, 10, 4, key="img_setup_perdish")
 
-    # Third row: Upload images and Run button
-    r3c1, r3c2 = st.columns([3,1])
-    with r3c1:
-        uploaded = st.file_uploader(
-            "Upload images (JPEG/PNG)",
-            type=["jpg", "jpeg", "png"],
-            accept_multiple_files=True,
-            key="img_setup_upload"
-        )
-    with r3c2:
-        run = st.button("Run")
+    # Second row: file uploader
+    uploaded = st.file_uploader(
+        "Upload images (JPEG/PNG)",
+        type=["jpg","jpeg","png"],
+        accept_multiple_files=True,
+        key="img_setup_upload"
+    )
+
+    # Third row: Run button
+    run = st.button("Run")
 
     if run:
         if not uploaded:
