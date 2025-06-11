@@ -606,9 +606,12 @@ if st.session_state['view'] == 'Image Viewer':
         # Load batch metadata from the 'info' worksheet
         all_info = ws_info.get_all_records()
         info_df  = pd.DataFrame(all_info)
+        # Normalize types and strip whitespace
+        info_df["username"] = info_df["username"].astype(str).str.strip()
+        info_df["batch_id"] = pd.to_numeric(info_df["batch_id"], errors="coerce")
         rec = info_df[
             (info_df["username"] == username) &
-            (info_df["batch_id"].astype(int) == int(batch_id_to_view))
+            (info_df["batch_id"] == batch_id_to_view)
         ]
         if rec.empty:
             st.error(f"Batch {batch_id_to_view} not found.")
@@ -625,9 +628,12 @@ if st.session_state['view'] == 'Image Viewer':
             # Load and display cell_counts
             all_counts = ws_counts.get_all_records()
             counts_df  = pd.DataFrame(all_counts)
+            # Normalize types and strip whitespace for counts_df
+            counts_df["username"] = counts_df["username"].astype(str).str.strip()
+            counts_df["batch_id"] = pd.to_numeric(counts_df["batch_id"], errors="coerce")
             batch_counts = counts_df[
                 (counts_df["username"] == username) &
-                (counts_df["batch_id"].astype(int) == int(batch_id_to_view))
+                (counts_df["batch_id"] == batch_id_to_view)
             ]
             if not batch_counts.empty:
                 st.subheader("Cell Counts")
