@@ -680,6 +680,9 @@ if st.session_state['view'] == 'Image Viewer':
                 if not batch_counts.empty:
                     st.subheader("Cell Counts")
 
+                    # Rename the third column to 'phase' if needed
+                    if "phase" not in batch_counts.columns and len(batch_counts.columns) > 2:
+                        batch_counts = batch_counts.rename(columns={batch_counts.columns[2]: "phase"})
                     # Pivot to wide form and show only Day 15, Day 21, Banking
                     pivot = batch_counts.set_index("phase").drop(columns=["username", "batch_id"], errors="ignore")
                     # Ensure rows exist
