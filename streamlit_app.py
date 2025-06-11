@@ -674,7 +674,8 @@ if st.session_state['view'] == 'Image Viewer':
 
                 if not batch_counts.empty:
                     st.subheader("Cell Counts")
-                    st.dataframe(batch_counts.set_index("phase"), use_container_width=True)
+                    # Display raw batch_counts table
+                    st.dataframe(batch_counts, use_container_width=True)
                 else:
                     st.info("No cell counts available for this batch.")
 
