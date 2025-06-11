@@ -1,5 +1,5 @@
 import streamlit as st
-st.set_page_config(page_title="DAC_manager_v11", layout="wide")
+st.set_page_config(page_title="DAC_manager_v12", layout="wide")
 
 
 import pandas as pd
@@ -598,25 +598,18 @@ if st.session_state['view'] == 'Batch Manager':
 if st.session_state['view'] == 'Image Viewer':
     st.subheader("🖼️ Image Viewer")
 
-    # Step 1: Input Batch ID
+    # 1) Input Batch ID to load info and counts
     batch_id_to_view = st.number_input(
-        "Batch ID to View (optional)", min_value=1, step=1, key="img_view_bid"
+        "Batch ID to View", min_value=1, step=1, key="img_view_bid"
     )
 
-    # Step 2: Image upload area
-    uploaded = st.file_uploader(
-        "Drag & drop image files here (JPEG/PNG), or click to browse",
-        type=["jpg", "jpeg", "png"],
-        accept_multiple_files=True
-    )
-
-    # If user provided an ID and uploaded files, load metadata then show images
-    if batch_id_to_view and uploaded:
-        # Load and filter batch info
+    if batch_id_to_view:
+        # Load and display batch metadata
         info_records = ws_info.get_all_records()
         df_info = pd.DataFrame(info_records)
         df_info["username"] = df_info["username"].astype(str).str.strip()
         df_info["batch_id"] = pd.to_numeric(df_info["batch_id"], errors="coerce")
+
         rec = df_info[
             (df_info["username"] == username) &
             (df_info["batch_id"] == batch_id_to_view)
@@ -634,11 +627,12 @@ if st.session_state['view'] == 'Image Viewer':
             st.write(f"• **Initial Plate Count:** {rec.get('initial_plate_count','')}")
             st.write(f"• **Replaced Plate Count:** {rec.get('replaced_plate_count','')}")
 
-            # load and display cell counts
+            # Load and display cell counts
             count_records = ws_counts.get_all_records()
             df_counts = pd.DataFrame(count_records)
             df_counts["username"] = df_counts["username"].astype(str).str.strip()
             df_counts["batch_id"] = pd.to_numeric(df_counts["batch_id"], errors="coerce")
+
             batch_counts = df_counts[
                 (df_counts["username"] == username) &
                 (df_counts["batch_id"] == batch_id_to_view)
@@ -649,8 +643,17 @@ if st.session_state['view'] == 'Image Viewer':
             else:
                 st.info("No cell counts available for this batch.")
 
-        st.markdown("---")
-        st.write("### Uploaded Images")
+    # Separator
+    st.markdown("---")
+
+    # 2) Image upload area
+    st.write("### Upload and Preview Images")
+    uploaded = st.file_uploader(
+        "Drag & drop image files here (JPEG/PNG) or click to browse",
+        type=["jpg", "jpeg", "png"],
+        accept_multiple_files=True
+    )
+    if uploaded:
         cols = st.columns(4)
         for i, f in enumerate(uploaded):
             try:
@@ -659,7 +662,4 @@ if st.session_state['view'] == 'Image Viewer':
             except Exception:
                 cols[i % 4].empty()
     else:
-        if not uploaded:
-            st.info("Please upload image files to proceed.")
-        elif not batch_id_to_view:
-            st.info("Please enter a Batch ID.")
+        st.info("Please enter a Batch ID and upload image files.")
