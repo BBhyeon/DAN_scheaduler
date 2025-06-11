@@ -603,43 +603,38 @@ if st.session_state['view'] == 'Batch Manager':
 if st.session_state['view'] == 'Image Viewer':
     st.subheader("🛠️ Image Viewer Setup")
 
-    # 1) Batch ID to load
-    batch_id_to_view = st.number_input(
-        "1. Batch ID to load", min_value=1, step=1, key="img_setup_bid"
-    )
+    # --- first row of controls ---
+    c1, c2, c3, c4 = st.columns([1,1,1,1])
+    with c1:
+        batch_id_to_view = st.number_input(
+            "Batch ID", min_value=1, step=1, key="img_setup_bid"
+        )
+    with c2:
+        images_per_row = st.number_input(
+            "Images/row", min_value=1, max_value=6, value=4, step=1, key="img_setup_cols"
+        )
+    with c3:
+        images_per_day = st.number_input(
+            "Images/day", min_value=1, value=100, step=1, key="img_setup_maxday"
+        )
+    with c4:
+        images_per_dish = st.number_input(
+            "Images/dish", min_value=1, value=4, step=1, key="img_setup_perdish"
+        )
 
-    # 2) Images per row
-    images_per_row = st.number_input(
-        "2. Images per row", min_value=1, max_value=6, value=4, step=1, key="img_setup_cols"
-    )
-
-    # 3) Max images per day
-    images_per_day = st.number_input(
-        "3. Images per day (max per group)",
-        min_value=1,
-        value=100,
-        step=1,
-        key="img_setup_maxday"
-    )
-
-    # 4) Show filenames
-    show_filenames = st.radio(
-        "4. Show filenames", ("Yes", "No"), index=0, key="img_setup_showfn"
-    )
-
-    # 5) Images per dish (max per dish)
-    images_per_dish = st.number_input(
-        "5. Images per dish (max per dish)", min_value=1, value=4, step=1, key="img_setup_perdish"
-    )
-
-    # 6) Upload images
-    uploaded = st.file_uploader(
-        "6. Load image files (JPEG/PNG)", accept_multiple_files=True,
-        type=["jpg","jpeg","png"], key="img_setup_upload"
-    )
-
-    # 7) Run button
-    run = st.button("7. Run")
+    # --- second row of controls ---
+    d1, d2, d3 = st.columns([1,2,1])
+    with d1:
+        show_filenames = st.selectbox(
+            "Show filenames", ["Yes", "No"], index=0, key="img_setup_showfn"
+        )
+    with d2:
+        uploaded = st.file_uploader(
+            "Upload images (JPEG/PNG)", type=["jpg","jpeg","png"],
+            accept_multiple_files=True, key="img_setup_upload"
+        )
+    with d3:
+        run = st.button("Run")
 
     if run:
         if not uploaded:
