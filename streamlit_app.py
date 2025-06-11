@@ -627,14 +627,19 @@ if st.session_state['view'] == 'Image Viewer':
         "4. Show filenames", ("Yes", "No"), index=0, key="img_setup_showfn"
     )
 
-    # 5) Upload images
+    # 5) Images per dish (max per dish)
+    images_per_dish = st.number_input(
+        "5. Images per dish (max per dish)", min_value=1, value=4, step=1, key="img_setup_perdish"
+    )
+
+    # 6) Upload images
     uploaded = st.file_uploader(
-        "5. Load image files (JPEG/PNG)", accept_multiple_files=True,
+        "6. Load image files (JPEG/PNG)", accept_multiple_files=True,
         type=["jpg","jpeg","png"], key="img_setup_upload"
     )
 
-    # 6) Run button
-    run = st.button("6. Run")
+    # 7) Run button
+    run = st.button("7. Run")
 
     if run:
         if not uploaded:
@@ -674,7 +679,6 @@ if st.session_state['view'] == 'Image Viewer':
 
                 if not batch_counts.empty:
                     st.subheader("Cell Counts")
-                    # Display raw batch_counts table
                     st.dataframe(batch_counts, use_container_width=True)
                 else:
                     st.info("No cell counts available for this batch.")
@@ -682,41 +686,47 @@ if st.session_state['view'] == 'Image Viewer':
             st.markdown("---")
             st.write("### Uploaded Images")
 
-            # --- Group images by day ---
+            # --- Group by day and dish ---
             from collections import defaultdict
             day_pat = re.compile(r"_D(\d+)_", re.IGNORECASE)
+            dish_pat = re.compile(r"#([^_]+)", re.IGNORECASE)
+
             groups = defaultdict(list)
             for f in uploaded:
-                m = day_pat.search(f.name)
-                day = m.group(1) if m else "Unknown"
+                # extract day
+                m_day = day_pat.search(f.name)
+                day = m_day.group(1) if m_day else "Unknown"
                 groups[day].append(f)
 
-            # Sort days numerically, Unknown last
-            def day_sort_key(item):
-                d, _ = item
-                return int(d) if d.isdigit() else float('inf')
-
-            # --- Render images ---
-            for day, files in sorted(groups.items(), key=day_sort_key):
+            # Display images per day and per dish
+            for day, files in sorted(groups.items(), key=lambda x: (int(x[0]) if x[0].isdigit() else float('inf'))):
                 st.markdown(f"### Day {day}")
-                # sort filenames low→high
-                files_sorted = sorted(files, key=lambda f: f.name)
-                subset = files_sorted[:images_per_day]
-                # Show images in rows with dynamic number of columns
-                for i in range(0, len(subset), images_per_row):
-                    chunk = subset[i : i + images_per_row]
-                    cols = st.columns(images_per_row)
-                    for idx, fobj in enumerate(chunk):
-                        try:
-                            img_disp = Image.open(fobj)
-                            if show_filenames == "Yes":
-                                cols[idx].image(img_disp, caption=fobj.name, use_container_width=True)
-                            else:
+                # group by dish
+                dish_groups = defaultdict(list)
+                for f in files:
+                    m_dish = dish_pat.search(f.name)
+                    dish = m_dish.group(1) if m_dish else "Unknown"
+                    dish_groups[dish].append(f)
+
+                for dish, dfiles in sorted(dish_groups.items()):
+                    st.markdown(f"#### Dish {dish}")
+                    # sort filenames
+                    dfiles_sorted = sorted(dfiles, key=lambda f: f.name)
+                    subset = dfiles_sorted[:images_per_dish]
+                    # display rows
+                    for i in range(0, len(subset), images_per_row):
+                        chunk = subset[i : i + images_per_row]
+                        cols = st.columns(images_per_row)
+                        for idx, fobj in enumerate(chunk):
+                            try:
+                                img_disp = Image.open(fobj)
                                 cols[idx].image(img_disp, use_container_width=True)
-                        except:
+                                if show_filenames == "Yes":
+                                    cols[idx].caption(fobj.name)
+                            except:
+                                cols[idx].empty()
+                        # clear remaining cols
+                        for idx in range(len(chunk), images_per_row):
                             cols[idx].empty()
-                    # If fewer than images_per_row, clear remaining columns
-                    for idx in range(len(chunk), images_per_row):
-                        cols[idx].empty()
     else:
         st.info("Configure settings above and click Run to view batch info and images.")
