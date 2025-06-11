@@ -690,7 +690,8 @@ if st.session_state['view'] == 'Image Viewer':
                         if ph not in pivot.index:
                             pivot.loc[ph] = [""] * pivot.shape[1]
                     pivot = pivot.loc[["Day 15", "Day 21", "Banking"]]
-
+                    # Drop columns where all values are blank or NaN
+                    pivot = pivot.replace("", pd.NA).dropna(axis=1, how="all")
                     # Display as static table
                     st.table(pivot)
                 else:
