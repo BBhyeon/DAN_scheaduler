@@ -596,70 +596,80 @@ if st.session_state['view'] == 'Batch Manager':
 
 # ---------------------- Image Viewer ----------------------
 if st.session_state['view'] == 'Image Viewer':
-    st.subheader("🖼️ Image Viewer")
+    st.subheader("🛠️ Image Viewer Setup")
 
-    # Optional Batch ID filter
+    # 1) Batch ID to load
     batch_id_to_view = st.number_input(
-        "Batch ID to View (optional)", min_value=1, step=1, key="img_view_bid"
+        "1. Batch ID to load", min_value=1, step=1, key="img_setup_bid"
     )
-
-    # File uploader for images
+    # 2) Images per row
+    images_per_row = st.number_input(
+        "2. Images per row", min_value=1, max_value=6, value=4, step=1, key="img_setup_cols"
+    )
+    # 3) Max images per day
+    images_per_day = st.number_input(
+        "3. Images per day (max per group)",
+        min_value=1,
+        value=len(st.session_state.get("img_setup_upload", [])),
+        step=1,
+        key="img_setup_maxday"
+    )
+    # 4) Show filenames
+    show_filenames = st.radio(
+        "4. Show filenames", ("Yes", "No"), index=0, key="img_setup_showfn"
+    )
+    # 5) Upload images
     uploaded = st.file_uploader(
-        "Drag & drop image files here (JPEG/PNG), or click to browse",
-        type=["jpg", "jpeg", "png"],
-        accept_multiple_files=True
+        "5. Load image files (JPEG/PNG)", accept_multiple_files=True,
+        type=["jpg", "jpeg", "png"], key="img_setup_upload"
     )
-    if not uploaded:
-        st.info("Please upload image files to proceed.")
-        st.stop()
+    # 6) Run button
+    run = st.button("6. Run")
 
-    # Layout controls
-    cols_per_row = st.slider("Images per row", 1, 6, 4)
-    max_per_group = st.number_input(
-        "Max images per day", min_value=1, value=len(uploaded)
-    )
-    show_filenames = st.checkbox("Show filenames", value=False)
-
-    # Load & display batch info if ID provided
-    if batch_id_to_view:
-        df_info = pd.DataFrame(ws_info.get_all_records())
-        df_info["username"] = df_info["username"].astype(str).str.strip()
-        df_info["batch_id"] = pd.to_numeric(df_info["batch_id"], errors="coerce")
-        rec = df_info[
-            (df_info["username"] == username) &
-            (df_info["batch_id"] == batch_id_to_view)
-        ]
-        if rec.empty:
-            st.error(f"Batch {batch_id_to_view} not found.")
+    if run:
+        if not uploaded:
+            st.warning("No images uploaded.")
         else:
-            rec = rec.iloc[0]
-            st.markdown(f"**Batch {batch_id_to_view} Information**")
-            st.write(f"• **Cell Type:** {rec['cell']}")
-            st.write(f"• **Start Date:** {rec['start_date']}")
-            st.write(f"• **End Date:** {rec['end_date']}")
-            st.write(f"• **Note:** {rec['note']}")
-            st.write(f"• **Initial Plate Count:** {rec['initial_plate_count']}")
-            st.write(f"• **Replaced Plate Count:** {rec['replaced_plate_count']}")
-            st.markdown("---")
+            # Load and display batch info (if ID provided)
+            if batch_id_to_view:
+                df_info = pd.DataFrame(ws_info.get_all_records())
+                df_info["username"] = df_info["username"].astype(str).str.strip()
+                df_info["batch_id"] = pd.to_numeric(df_info["batch_id"], errors="coerce")
+                rec = df_info[
+                    (df_info["username"] == username) &
+                    (df_info["batch_id"] == batch_id_to_view)
+                ]
+                if rec.empty:
+                    st.error(f"Batch {batch_id_to_view} not found.")
+                else:
+                    rec = rec.iloc[0]
+                    st.markdown(f"**Batch {batch_id_to_view} Info**")
+                    st.write(f"• Cell Type: {rec['cell']}")
+                    st.write(f"• Start Date: {rec['start_date']}")
+                    st.write(f"• End Date: {rec['end_date']}")
+                    st.write(f"• Note: {rec['note']}")
+                    st.write(f"• Initial Count: {rec['initial_plate_count']}")
+                    st.write(f"• Replaced Count: {rec['replaced_plate_count']}")
+                    st.markdown("---")
 
-    # Group uploaded files by day parsed from filename
-    from collections import defaultdict
-    day_pat = re.compile(r"_D(\d+)_", re.IGNORECASE)
-    groups = defaultdict(list)
-    for f in uploaded:
-        m = day_pat.search(f.name)
-        day = m.group(1) if m else "Unknown"
-        groups[day].append(f)
+            # Group by day in filename
+            from collections import defaultdict
+            day_pat = re.compile(r"_D(\\d+)_", re.IGNORECASE)
+            groups = defaultdict(list)
+            for f in uploaded:
+                m = day_pat.search(f.name)
+                day = m.group(1) if m else "Unknown"
+                groups[day].append(f)
 
-    # Display each day group
-    for day, files in sorted(groups.items(), key=lambda x: x[0]):
-        st.markdown(f"### Day {day}")
-        subset = files[:max_per_group]
-        for i in range(0, len(subset), cols_per_row):
-            row = subset[i : i + cols_per_row]
-            cols = st.columns(len(row))
-            for col, f in zip(cols, row):
-                img = Image.open(f)
-                col.image(img, use_container_width=True)
-                if show_filenames:
-                    col.caption(f.name)
+            # Display images
+            for day, files in sorted(groups.items(), key=lambda x: (x[0] != "Unknown", x[0])):
+                st.markdown(f"### Day {day}")
+                subset = files[:images_per_day]
+                for i in range(0, len(subset), images_per_row):
+                    row = subset[i:i+images_per_row]
+                    cols = st.columns(len(row))
+                    for col, f in zip(cols, row):
+                        img = Image.open(f)
+                        col.image(img, use_column_width=True)
+                        if show_filenames == "Yes":
+                            col.caption(f.name)
